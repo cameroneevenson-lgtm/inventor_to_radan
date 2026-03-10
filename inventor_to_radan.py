@@ -9,7 +9,7 @@ import csv
 try:
     import pandas as pd
 except ImportError:
-    print("ERROR: pandas is not installed.\nRun: python -m pip install pandas openpyxl")
+    print("ERROR: pandas is not installed.\nRun: python -m pip install pandas")
     sys.exit(1)
 
 try:
@@ -177,12 +177,10 @@ def choose_qty_col(df: pd.DataFrame) -> str:
 def read_bom(path: str) -> pd.DataFrame:
     ext = os.path.splitext(path)[1].lower()
 
-    if ext in [".xlsx", ".xlsm", ".xls"]:
-        raw = pd.read_excel(path, sheet_name=0, header=None)
-    elif ext == ".csv":
+    if ext == ".csv":
         raw = pd.read_csv(path, header=None, engine="python")
     else:
-        raise ValueError(f"Unsupported BOM type: {ext}")
+        raise ValueError(f"Unsupported BOM type: {ext}. CSV only.")
 
     raw = raw.dropna(axis=0, how="all").dropna(axis=1, how="all")
     if raw.shape[0] == 0 or raw.shape[1] == 0:
@@ -792,7 +790,7 @@ if __name__ == "__main__":
         input("Script started. Press Enter to continue...")
 
     if len(sys.argv) < 2:
-        print("Drag an Inventor BOM (.xlsx or .csv) onto this script.")
+        print("Drag a BOM (.csv) onto this script.")
         sys.exit(1)
 
     app = QApplication(sys.argv)
@@ -802,3 +800,5 @@ if __name__ == "__main__":
         QMessageBox.critical(None, "Error", f"{type(e).__name__}: {e}")
         rc = 1
     sys.exit(rc)
+
+
