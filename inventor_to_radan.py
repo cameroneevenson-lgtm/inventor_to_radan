@@ -40,6 +40,7 @@ LASER_MATERIALS_CSV = os.path.join(TOOLS_DIR, "laser_materials.csv")            
 
 RADAN_OUTPUT_SUFFIX = "_Radan.csv"
 REPORT_SUFFIX = "_report.txt"
+SUPPORTED_BOM_EXTENSIONS = {".csv", ".xlsx"}
 
 # HARD REQUIREMENT: Output column order must not change
 RADAN_COL_ORDER = ["FILE", "QTY", "MATERIAL", "THICKNESS", "UNIT", "STRATEGY"]
@@ -174,18 +175,13 @@ def choose_qty_col(df: pd.DataFrame) -> str:
 # Robust BOM reading (handles shifted right/down)
 # ============================================================
 
-def read_bom(path: str) -> pd.DataFrame:
-    ext = os.path.splitext(path)[1].lower()
-
-    if ext == ".csv":
-        raw = pd.read_csv(path, header=None, engine="python")
-    else:
-        raise ValueError(f"Unsupported BOM type: {ext}. CSV only.")
-
+def _trim_raw_bom(raw: pd.DataFrame) -> pd.DataFrame:
     raw = raw.dropna(axis=0, how="all").dropna(axis=1, how="all")
     if raw.shape[0] == 0 or raw.shape[1] == 0:
         raise ValueError("BOM appears empty after removing blank rows/columns.")
+    return raw
 
+def _detect_header_row(raw: pd.DataFrame) -> tuple[int | None, int]:
     header_keywords = ["part", "description", "desc", "qty", "quantity", "material"]
     best_row = None
     best_score = -1
@@ -203,10 +199,16 @@ def read_bom(path: str) -> pd.DataFrame:
             best_row = i
             break
 
+    return best_row, best_score
+
+def _finalize_bom_frame(raw: pd.DataFrame, source_label: str) -> pd.DataFrame:
+    raw = _trim_raw_bom(raw)
+    best_row, best_score = _detect_header_row(raw)
+
     if best_row is None or best_score < 2:
         preview = raw.head(10).to_string(index=False, header=False)
         raise ValueError(
-            "Could not confidently locate the header row.\n"
+            f"Could not confidently locate the header row in {source_label}.\n"
             "Expected columns like Part/Description/Qty.\n\n"
             f"Top of file preview:\n{preview}"
         )
@@ -218,6 +220,50 @@ def read_bom(path: str) -> pd.DataFrame:
     df = df.loc[:, [c for c in df.columns if normalize_text(c) != ""]]
     df = df.dropna(axis=0, how="all")
     return df
+
+def read_bom(path: str) -> pd.DataFrame:
+    ext = os.path.splitext(path)[1].lower()
+
+    if ext == ".csv":
+        raw = pd.read_csv(path, header=None, engine="python")
+        return _finalize_bom_frame(raw, os.path.basename(path))
+
+    if ext == ".xlsx":
+        try:
+            sheets = pd.read_excel(path, header=None, sheet_name=None, engine="openpyxl")
+        except ImportError as exc:
+            raise RuntimeError(
+                "Reading .xlsx BOMs requires openpyxl.\n"
+                "Run: python -m pip install openpyxl"
+            ) from exc
+
+        best_candidate = None
+
+        for sheet_name, raw in sheets.items():
+            try:
+                trimmed = _trim_raw_bom(raw)
+            except ValueError:
+                continue
+
+            best_row, best_score = _detect_header_row(trimmed)
+            candidate = {
+                "sheet_name": sheet_name,
+                "raw": trimmed,
+                "best_score": best_score,
+            }
+            if best_candidate is None or candidate["best_score"] > best_candidate["best_score"]:
+                best_candidate = candidate
+
+        if best_candidate is None:
+            raise ValueError("Workbook appears empty across all sheets.")
+
+        return _finalize_bom_frame(
+            best_candidate["raw"],
+            f"{os.path.basename(path)} [{best_candidate['sheet_name']}]",
+        )
+
+    supported = ", ".join(sorted(SUPPORTED_BOM_EXTENSIONS))
+    raise ValueError(f"Unsupported BOM type: {ext}. Supported types: {supported}.")
 
 # ============================================================
 # PySide6: Stepped dialogs
@@ -790,7 +836,7 @@ if __name__ == "__main__":
         input("Script started. Press Enter to continue...")
 
     if len(sys.argv) < 2:
-        print("Drag a BOM (.csv) onto this script.")
+        print("Drag a BOM (.csv or .xlsx) onto this script.")
         sys.exit(1)
 
     app = QApplication(sys.argv)

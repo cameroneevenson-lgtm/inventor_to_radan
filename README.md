@@ -1,10 +1,10 @@
 # Inventor to Radan (v1.0)
 
-Convert an Inventor BOM (`.csv`) into a Radan import CSV, with DXF accountability checks and a text report.
+Convert an Inventor BOM (`.csv` or `.xlsx`) into a Radan import CSV, with DXF accountability checks and a text report.
 
 ## What this tool does
 
-- Reads BOM data from CSV.
+- Reads BOM data from CSV or Excel (`.xlsx`).
 - Detects key BOM columns (Part, Description, Quantity, optional Material).
 - Checks whether each `PartNumber.dxf` exists in the BOM folder.
 - Prompts for missing DXF classification:
@@ -31,12 +31,13 @@ Convert an Inventor BOM (`.csv`) into a Radan import CSV, with DXF accountabilit
 - Python 3.10+ (recommended)
 - Packages:
   - `pandas`
+  - `openpyxl` for `.xlsx` BOM files
   - `pyside6`
 
 Install dependencies:
 
 ```powershell
-python -m pip install pandas pyside6
+python -m pip install pandas openpyxl pyside6
 ```
 
 ## Run
@@ -45,12 +46,18 @@ python -m pip install pandas pyside6
 
 1. Ensure `inventor_to_radan.bat` points to a valid Python at:
    - `C:\Tools\.venv\Scripts\python.exe`
-2. Drag a BOM file (`.csv`) onto `inventor_to_radan.bat`.
+2. Drag a BOM file (`.csv` or `.xlsx`) onto `inventor_to_radan.bat`.
 
 ### Option 2: Direct Python
 
 ```powershell
 python inventor_to_radan.py "W:\path\to\BOM.csv"
+```
+
+You can also pass an Excel BOM:
+
+```powershell
+python inventor_to_radan.py "W:\path\to\BOM.xlsx"
 ```
 
 ## Output
