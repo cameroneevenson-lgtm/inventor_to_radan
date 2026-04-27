@@ -1,6 +1,8 @@
 import os
 import sys
 import csv
+import html
+from dataclasses import dataclass
 
 # ============================================================
 # Optional dependencies
@@ -16,7 +18,8 @@ try:
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import (
         QApplication, QDialog, QLabel, QVBoxLayout, QHBoxLayout, QPushButton,
-        QLineEdit, QMessageBox, QCheckBox, QWidget, QSpacerItem, QSizePolicy
+        QLineEdit, QMessageBox, QCheckBox, QWidget, QSpacerItem, QSizePolicy,
+        QTextEdit
     )
 except ImportError:
     print("ERROR: PySide6 is not installed.\nRun: python -m pip install pyside6")
@@ -44,6 +47,44 @@ SUPPORTED_BOM_EXTENSIONS = {".csv", ".xlsx"}
 
 # HARD REQUIREMENT: Output column order must not change
 RADAN_COL_ORDER = ["FILE", "QTY", "MATERIAL", "THICKNESS", "UNIT", "STRATEGY"]
+
+
+@dataclass(frozen=True)
+class InventorToRadanResult:
+    bom_path: str
+    out_path: str
+    report_path: str
+    added_count: int
+    expected_missing_dxfs: tuple[str, ...]
+    orphan_dxfs: tuple[str, ...]
+    missing_pdfs: tuple[str, ...]
+    nonlaser_parts: tuple[str, ...]
+
+
+class InventorToRadanNeedsUi(RuntimeError):
+    def __init__(
+        self,
+        *,
+        missing_dxf_items: list[dict] | None = None,
+        missing_rules: list[str] | None = None,
+    ) -> None:
+        self.missing_dxf_items = missing_dxf_items or []
+        self.missing_rules = missing_rules or []
+        parts: list[str] = []
+        if self.missing_dxf_items:
+            parts.append(f"{len(self.missing_dxf_items)} missing-DXF classification(s)")
+        if self.missing_rules:
+            parts.append(f"{len(self.missing_rules)} RADAN rule(s)")
+        detail = " and ".join(parts) if parts else "user input"
+        super().__init__(f"Inventor-to-RADAN needs {detail}.")
+
+
+class InventorToRadanCancelled(RuntimeError):
+    pass
+
+
+class InventorToRadanReportRejected(RuntimeError):
+    pass
 
 # ============================================================
 # Disk-first helpers (write immediately; read from disk for checks)
@@ -490,6 +531,190 @@ class RadanRuleDialog(QDialog):
         else:
             self.load_step()
 
+
+class ReportReviewDialog(QDialog):
+    REVIEW_SECTION_LEVELS = {
+        "Expected laser but missing DXF": "red",
+        "Orphan DXFs": "yellow",
+        "DXFs missing PDFs": "yellow",
+        "Non-laser parts": "yellow",
+    }
+
+    def __init__(self, result: InventorToRadanResult, parent=None):
+        super().__init__(parent)
+        self.result = result
+        self._acknowledged = False
+        self.rejected_without_ack = False
+        self.setWindowTitle("Review Inventor-to-RADAN Report")
+        self.setWindowModality(Qt.ApplicationModal)
+        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+
+        title = _label("Review required before production use", bold=True)
+        warning_count = (
+            len(result.expected_missing_dxfs)
+            + len(result.orphan_dxfs)
+            + len(result.missing_pdfs)
+            + len(result.nonlaser_parts)
+        )
+        critical_count = len(result.expected_missing_dxfs)
+        if critical_count:
+            detail_text = (
+                f"This report contains {critical_count} critical item(s) and "
+                f"{warning_count - critical_count} review item(s). "
+                "Read the report below before acknowledging completion."
+            )
+            detail_style = "color: #B91C1C;"
+        elif warning_count:
+            detail_text = (
+                f"This report contains {warning_count} item(s) to check. "
+                "Read the yellow sections below before acknowledging completion."
+            )
+            detail_style = "color: #A16207;"
+        else:
+            detail_text = (
+                "No report warnings were found. Review the green confirmation sections before closing this conversion."
+            )
+            detail_style = "color: #15803D;"
+        detail = _label(detail_text, bold=True)
+        detail.setStyleSheet(detail_style)
+
+        path_label = _label(f"Report: {result.report_path}")
+
+        self.viewer = QTextEdit()
+        self.viewer.setReadOnly(True)
+        self.viewer.setLineWrapMode(QTextEdit.NoWrap)
+        try:
+            report_text = open(result.report_path, encoding="utf-8").read()
+        except OSError as exc:
+            report_text = f"Could not read report file:\n{exc}"
+        self.viewer.setHtml(self._report_html(report_text))
+
+        self.chk_ack = QCheckBox("I have reviewed this report and understand any warnings before production.")
+        self.chk_ack.stateChanged.connect(self._update_ack_button)
+
+        self.btn_open = QPushButton("Open Report File")
+        self.btn_open.clicked.connect(self.open_report)
+        self.btn_ack = QPushButton("Acknowledge Report")
+        self.btn_ack.setEnabled(False)
+        self.btn_ack.clicked.connect(self.accept)
+        self.btn_discard = QPushButton("Discard CSV/Report")
+        self.btn_discard.clicked.connect(self.reject)
+
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(self.btn_open)
+        btn_row.addWidget(self.btn_discard)
+        btn_row.addWidget(self.btn_ack)
+
+        lay = QVBoxLayout()
+        lay.addWidget(title)
+        lay.addWidget(detail)
+        lay.addWidget(path_label)
+        lay.addWidget(self.viewer, 1)
+        lay.addWidget(self.chk_ack)
+        lay.addLayout(btn_row)
+        self.setLayout(lay)
+        self.resize(920, 680)
+
+    @classmethod
+    def _report_html(cls, report_text: str) -> str:
+        colors = {
+            "base": "#111827",
+            "muted": "#475569",
+            "green": "#15803D",
+            "yellow": "#A16207",
+            "red": "#B91C1C",
+        }
+        active_level = ""
+        rows: list[str] = []
+        for line in report_text.splitlines():
+            stripped = line.strip()
+            if stripped.endswith(":"):
+                active_level = ""
+                for section, level in cls.REVIEW_SECTION_LEVELS.items():
+                    if stripped.startswith(section):
+                        active_level = level
+                        break
+                color = colors.get(active_level, colors["base"])
+                weight = "700" if active_level else "600"
+            elif stripped == "(none)" and active_level:
+                color = colors["green"]
+                weight = "700"
+            elif stripped and active_level:
+                color = colors[active_level]
+                weight = "700"
+            elif stripped:
+                color = colors["base"]
+                weight = "400"
+            else:
+                color = colors["muted"]
+                weight = "400"
+            rows.append(
+                "<div style='white-space: pre-wrap; "
+                f"color: {color}; font-weight: {weight};'>"
+                f"{html.escape(line) or '&nbsp;'}</div>"
+            )
+        body = "\n".join(rows)
+        return (
+            "<html><body style='font-family: Consolas, monospace; "
+            "font-size: 10pt; background: #FFFFFF;'>"
+            f"{body}</body></html>"
+        )
+
+    def _update_ack_button(self):
+        self.btn_ack.setEnabled(self.chk_ack.isChecked())
+
+    def open_report(self):
+        try:
+            os.startfile(self.result.report_path)  # type: ignore[attr-defined]
+        except Exception as exc:
+            QMessageBox.warning(self, "Open Report", str(exc))
+
+    def accept(self):
+        if not self.chk_ack.isChecked():
+            QMessageBox.warning(
+                self,
+                "Review Required",
+                "Review the report and check the acknowledgement before continuing.",
+            )
+            return
+        self._acknowledged = True
+        super().accept()
+
+    def reject(self):
+        if not self._acknowledged:
+            choice = QMessageBox.question(
+                self,
+                "Discard Inventor Output?",
+                "Close without acknowledging this report?\n\n"
+                "The generated RADAN CSV and report will be deleted.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if choice != QMessageBox.Yes:
+                return
+            self.rejected_without_ack = True
+            super().reject()
+            return
+        super().reject()
+
+    def closeEvent(self, event):
+        if self._acknowledged:
+            event.accept()
+            return
+        choice = QMessageBox.question(
+            self,
+            "Discard Inventor Output?",
+            "Close without acknowledging this report?\n\n"
+            "The generated RADAN CSV and report will be deleted.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if choice == QMessageBox.Yes:
+            self.rejected_without_ack = True
+            event.accept()
+            return
+        event.ignore()
+
 # ============================================================
 # Core logic
 # ============================================================
@@ -585,7 +810,7 @@ def write_report(report_path: str,
             f.write("  (none)\n")
         f.write("\n")
 
-def main(bom_path: str) -> int:
+def ensure_config_csvs() -> None:
     ensure_dir(TOOLS_DIR)
     ensure_csv(RULES_CSV, ["Description", "Material", "Thickness", "Strategy"])
     ensure_csv(FTQ_CSV, ["PartNumber"])
@@ -593,6 +818,8 @@ def main(bom_path: str) -> int:
     ensure_csv(EXPECTED_LASER_DESC_CSV, ["Description"])
     ensure_csv(LASER_MATERIALS_CSV, ["Material"])
 
+
+def prepare_bom_dataframe(bom_path: str) -> tuple[pd.DataFrame, str]:
     base_dir = os.path.dirname(bom_path)
 
     # ---- Read BOM robustly
@@ -621,20 +848,18 @@ def main(bom_path: str) -> int:
         return os.path.exists(os.path.join(base_dir, f"{part}.dxf"))
 
     df["_HasDxf"] = df["_Part"].apply(has_dxf)
+    return df, base_dir
 
-    # ---- Persistence (disk)
-    ftq_parts = load_set(FTQ_CSV, "PartNumber")
 
-    # ---- Learn laser materials from DXF-present rows (trust BOM)
-    if mat_col:
-        for m, hd in zip(df["_Mat"].tolist(), df["_HasDxf"].tolist()):
-            if hd and m:
-                append_unique(LASER_MATERIALS_CSV, ["Material"], [m])
+def learn_laser_materials(df: pd.DataFrame) -> None:
+    if "_Mat" not in df.columns:
+        return
+    for m, hd in zip(df["_Mat"].tolist(), df["_HasDxf"].tolist()):
+        if hd and m:
+            append_unique(LASER_MATERIALS_CSV, ["Material"], [m])
 
-    # ============================================================
-    # DXF Accountability: classify unknown missing-DXF descriptions
-    # ============================================================
 
+def collect_missing_dxf_prompt_items(df: pd.DataFrame) -> list[dict]:
     missing_df = df[df["_HasDxf"] == False].copy()
     prompt_items: list[dict] = []
 
@@ -678,32 +903,22 @@ def main(bom_path: str) -> int:
         seen.add(it["desc"])
         prompt_unique.append(it)
 
-    if prompt_unique:
-        dlg = MissingDxfDialog(prompt_unique)
-        if dlg.exec() != QDialog.Accepted:
-            return 2
+    return prompt_unique
 
-    # ============================================================
-    # RADAN rules: prompt only for descriptions that have DXFs
-    # ============================================================
 
-    rules = load_rules()
-    ftq_descs = set(df.loc[df["_Part"].isin(ftq_parts), "_Desc"].tolist())
-
+def collect_missing_rules(df: pd.DataFrame, rules: dict[str, dict]) -> list[str]:
     laser_descs = sorted(set(df.loc[df["_HasDxf"] == True, "_Desc"].tolist()))
-    rules = load_rules()
-    missing_rules = [d for d in laser_descs if d and d not in rules]
+    return [d for d in laser_descs if d and d not in rules]
 
-    if missing_rules:
-        dlg = RadanRuleDialog(missing_rules, ftq_descs)
-        if dlg.exec() != QDialog.Accepted:
-            return 2
-        rules = load_rules()
 
-    # ============================================================
-    # Generate RADAN output: BOM row + DXF exists + qty > 0
-    # ============================================================
-
+def write_radan_outputs(
+    *,
+    bom_path: str,
+    base_dir: str,
+    df: pd.DataFrame,
+    rules: dict[str, dict],
+    ftq_parts: set[str],
+) -> InventorToRadanResult:
     rows: list[dict] = []
     bom_dxfs: set[str] = set()
 
@@ -789,18 +1004,30 @@ def main(bom_path: str) -> int:
         nonlaser_parts=nonlaser_parts,
     )
 
-    # Final summary with previews
+    return InventorToRadanResult(
+        bom_path=bom_path,
+        out_path=out_path,
+        report_path=report_path,
+        added_count=len(out_df),
+        expected_missing_dxfs=tuple(expected_missing_dxfs),
+        orphan_dxfs=tuple(sorted(orphan_dxfs)),
+        missing_pdfs=tuple(sorted(missing_pdfs)),
+        nonlaser_parts=tuple(nonlaser_parts),
+    )
+
+
+def build_summary_message(result: InventorToRadanResult) -> str:
     msg_lines = [
-        f"Added {len(out_df)} rows to RADAN output:",
-        out_path,
+        f"Added {result.added_count} rows to RADAN output:",
+        result.out_path,
         "",
         "Wrote report:",
-        report_path,
+        result.report_path,
     ]
 
-    if expected_missing_dxfs:
-        preview = expected_missing_dxfs[:20]
-        more = len(expected_missing_dxfs) - len(preview)
+    if result.expected_missing_dxfs:
+        preview = list(result.expected_missing_dxfs[:20])
+        more = len(result.expected_missing_dxfs) - len(preview)
         msg_lines += ["", "Expected DXFs missing (showing up to 20):"]
         msg_lines += preview
         if more > 0:
@@ -808,22 +1035,104 @@ def main(bom_path: str) -> int:
     else:
         msg_lines += ["", "Expected DXFs missing: (none)"]
 
-    if orphan_dxfs:
-        msg_lines += ["", f"Orphan DXFs (in folder, not in BOM): {len(orphan_dxfs)} (see report)"]
+    if result.orphan_dxfs:
+        msg_lines += ["", f"Orphan DXFs (in folder, not in BOM): {len(result.orphan_dxfs)} (see report)"]
     else:
         msg_lines += ["", "Orphan DXFs: (none)"]
 
-    if missing_pdfs:
-        msg_lines += [f"DXFs missing PDFs: {len(missing_pdfs)} (see report)"]
+    if result.missing_pdfs:
+        msg_lines += [f"DXFs missing PDFs: {len(result.missing_pdfs)} (see report)"]
     else:
         msg_lines += ["DXFs missing PDFs: (none)"]
 
-    if nonlaser_parts:
-        msg_lines += ["", f"Non-laser parts (no DXF): {len(nonlaser_parts)} (see report)"]
+    if result.nonlaser_parts:
+        msg_lines += ["", f"Non-laser parts (no DXF): {len(result.nonlaser_parts)} (see report)"]
     else:
         msg_lines += ["", "Non-laser parts (no DXF): (none)"]
 
-    QMessageBox.information(None, "Done", "\n".join(msg_lines))
+    return "\n".join(msg_lines)
+
+
+def delete_generated_outputs(result: InventorToRadanResult) -> tuple[str, ...]:
+    failed: list[str] = []
+    for path in (result.out_path, result.report_path):
+        try:
+            if path and os.path.exists(path):
+                os.remove(path)
+        except OSError as exc:
+            failed.append(f"{path}: {exc}")
+    return tuple(failed)
+
+
+def convert_bom_to_radan_csv(
+    bom_path: str,
+    *,
+    allow_prompts: bool = False,
+    show_summary: bool = False,
+) -> InventorToRadanResult:
+    ensure_config_csvs()
+    df, base_dir = prepare_bom_dataframe(bom_path)
+
+    # ---- Persistence (disk)
+    ftq_parts = load_set(FTQ_CSV, "PartNumber")
+
+    # ---- Learn laser materials from DXF-present rows (trust BOM)
+    learn_laser_materials(df)
+
+    # ============================================================
+    # DXF Accountability: classify unknown missing-DXF descriptions
+    # ============================================================
+
+    prompt_unique = collect_missing_dxf_prompt_items(df)
+    if prompt_unique:
+        if not allow_prompts:
+            raise InventorToRadanNeedsUi(missing_dxf_items=prompt_unique)
+        dlg = MissingDxfDialog(prompt_unique)
+        if dlg.exec() != QDialog.Accepted:
+            raise InventorToRadanCancelled()
+
+    # ============================================================
+    # RADAN rules: prompt only for descriptions that have DXFs
+    # ============================================================
+
+    rules = load_rules()
+    ftq_descs = set(df.loc[df["_Part"].isin(ftq_parts), "_Desc"].tolist())
+    missing_rules = collect_missing_rules(df, rules)
+
+    if missing_rules:
+        if not allow_prompts:
+            raise InventorToRadanNeedsUi(missing_rules=missing_rules)
+        dlg = RadanRuleDialog(missing_rules, ftq_descs)
+        if dlg.exec() != QDialog.Accepted:
+            raise InventorToRadanCancelled()
+        rules = load_rules()
+
+    result = write_radan_outputs(
+        bom_path=bom_path,
+        base_dir=base_dir,
+        df=df,
+        rules=rules,
+        ftq_parts=ftq_parts,
+    )
+    if show_summary:
+        dialog = ReportReviewDialog(result)
+        if dialog.exec() != QDialog.Accepted:
+            failed_deletes = delete_generated_outputs(result)
+            if failed_deletes:
+                QMessageBox.warning(
+                    None,
+                    "Delete Inventor Output",
+                    "Some generated files could not be deleted:\n\n" + "\n".join(failed_deletes),
+                )
+            raise InventorToRadanReportRejected()
+    return result
+
+
+def main(bom_path: str) -> int:
+    try:
+        convert_bom_to_radan_csv(bom_path, allow_prompts=True, show_summary=True)
+    except (InventorToRadanCancelled, InventorToRadanReportRejected):
+        return 2
     return 0
 
 # ============================================================
