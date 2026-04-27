@@ -30,3 +30,4 @@ Description,Material,Thickness,Strategy
 "PLATE, MS, .375"" THK, 44W",Mild Steel-A36,0.375,O2
 "SHEET, SS, .1875"" THK, 304",Stainless Steel,0.18,N2
 "SHEET, AL ALY, .125"" THK, 3003 H22 FTQ",Aluminum 3003 CHK FTQ,0.18,Air
+"PLATE, AL ALY, 0.500 in THK, 5052",Aluminum 5052,.5,Air
