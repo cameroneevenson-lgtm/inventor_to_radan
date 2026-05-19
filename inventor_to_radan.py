@@ -1,7 +1,5 @@
 import os
 import sys
-import csv
-import html
 from dataclasses import dataclass
 
 # ============================================================
@@ -17,36 +15,46 @@ except ImportError:
 try:
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import (
-        QApplication, QDialog, QLabel, QVBoxLayout, QHBoxLayout, QPushButton,
-        QLineEdit, QMessageBox, QCheckBox, QWidget, QSpacerItem, QSizePolicy,
-        QTextEdit
+        QApplication, QDialog, QMessageBox
     )
 except ImportError:
     print("ERROR: PySide6 is not installed.\nRun: python -m pip install pyside6")
     sys.exit(1)
 
+from bom_reader import (
+    _detect_header_row,
+    _finalize_bom_frame,
+    _trim_raw_bom,
+    choose_qty_col,
+    find_col,
+    first_token,
+    normalize_text,
+    read_bom as _read_bom,
+    to_int,
+)
+from config import (
+    EXPECTED_LASER_DESC_CSV,
+    FTQ_CSV,
+    LASER_MATERIALS_CSV,
+    NONLASER_TOKENS_CSV,
+    RADAN_COL_ORDER,
+    RADAN_OUTPUT_SUFFIX,
+    REPORT_SUFFIX,
+    RULES_CSV,
+    SUPPORTED_BOM_EXTENSIONS,
+    TOOLS_DIR,
+)
+from dialogs.missing_dxf_dialog import MissingDxfDialog as _MissingDxfDialog, make_label as _label
+from dialogs.radan_rule_dialog import RadanRuleDialog as _RadanRuleDialog
+from dialogs.report_review_dialog import ReportReviewDialog
+from report_writer import write_report
+import rule_store
+
 # ============================================================
 # Configuration
 # ============================================================
 
-TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
-
-RULES_CSV = os.path.join(TOOLS_DIR, "description_rules.csv")  # Description,Material,Thickness,Strategy
-FTQ_CSV = os.path.join(TOOLS_DIR, "ftq_parts.csv")            # PartNumber
-
-# DXF Accountability (trust BOM) — your nuance:
-# - Non-laser confirmation uses FIRST TOKEN only (family-level)
-# - Expected-laser (missing DXF) uses FULL DESCRIPTION (exact)
-NONLASER_TOKENS_CSV = os.path.join(TOOLS_DIR, "nonlaser_tokens.csv")                 # Token
-EXPECTED_LASER_DESC_CSV = os.path.join(TOOLS_DIR, "expected_laser_descriptions.csv") # Description
-LASER_MATERIALS_CSV = os.path.join(TOOLS_DIR, "laser_materials.csv")                 # Material (learned)
-
-RADAN_OUTPUT_SUFFIX = "_Radan.csv"
-REPORT_SUFFIX = "_report.txt"
-SUPPORTED_BOM_EXTENSIONS = {".csv", ".xlsx"}
-
 # HARD REQUIREMENT: Output column order must not change
-RADAN_COL_ORDER = ["FILE", "QTY", "MATERIAL", "THICKNESS", "UNIT", "STRATEGY"]
 
 
 @dataclass(frozen=True)
@@ -90,630 +98,56 @@ class InventorToRadanReportRejected(RuntimeError):
 # Disk-first helpers (write immediately; read from disk for checks)
 # ============================================================
 
-def normalize_text(val) -> str:
-    if pd.isna(val):
-        return ""
-    return str(val).replace("\u00a0", " ").strip()
-
-def first_token(desc: str) -> str:
-    d = normalize_text(desc)
-    return d.split()[0] if d else ""
-
 def ensure_dir(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
+    rule_store.ensure_dir(path)
 
 def ensure_csv(path: str, header: list[str]) -> None:
-    if not os.path.exists(path):
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            csv.writer(f).writerow(header)
+    rule_store.ensure_csv(path, header)
 
 def load_set(path: str, col: str) -> set[str]:
-    s: set[str] = set()
-    if not os.path.exists(path):
-        return s
-    with open(path, newline="", encoding="utf-8") as f:
-        for r in csv.DictReader(f):
-            v = normalize_text(r.get(col, ""))
-            if v:
-                s.add(v)
-    return s
+    return rule_store.load_set(path, col)
 
 def append_unique(path: str, header: list[str], row: list[str]) -> None:
-    """Append row if key (first column) isn't already present. Reads disk each time."""
-    key = normalize_text(row[0]) if row else ""
-    if not key:
-        return
-    if key in load_set(path, header[0]):
-        return
-    with open(path, "a", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow(row)
+    rule_store.append_unique(path, header, row)
 
 def load_rules() -> dict[str, dict]:
-    rules: dict[str, dict] = {}
-    if not os.path.exists(RULES_CSV):
-        return rules
-    with open(RULES_CSV, newline="", encoding="utf-8") as f:
-        for r in csv.DictReader(f):
-            d = normalize_text(r.get("Description", ""))
-            if d:
-                rules[d] = r
-    return rules
+    return rule_store.load_rules(RULES_CSV)
 
 def append_rule(desc: str, mat: str, thk: str, strat: str) -> None:
-    # Enforce "normalize once" on Description key
-    append_unique(RULES_CSV, ["Description", "Material", "Thickness", "Strategy"], [desc, mat, thk, strat])
-
-def find_col(df: pd.DataFrame, keys: list[str]) -> str:
-    cols = [(c, normalize_text(c).lower()) for c in df.columns]
-    for k in keys:
-        k = k.lower()
-        for c, n in cols:
-            if k in n:
-                return c
-
-    def squish(s: str) -> str:
-        return "".join(ch for ch in s.lower() if ch.isalnum())
-
-    keys_sq = [squish(k) for k in keys]
-    for c, n in cols:
-        n_sq = squish(n)
-        for ksq in keys_sq:
-            if ksq and ksq in n_sq:
-                return c
-
-    raise ValueError(f"Missing column: {keys}. Available columns: {list(df.columns)}")
-
-def to_int(val) -> int:
-    try:
-        v = normalize_text(val)
-        if not v:
-            return 0
-        return int(float(v))
-    except Exception:
-        return 0
-
-def choose_qty_col(df: pd.DataFrame) -> str:
-    """
-    Choose the best Qty/Quantity column by content (most numeric).
-    Prevents silent 'qty=0' when a similarly-named non-numeric column is selected.
-    """
-    candidates: list[str] = []
-    for c in df.columns:
-        n = normalize_text(c).lower()
-        if any(k in n for k in ["qty", "quantity", "q'ty", "q ty"]):
-            candidates.append(c)
-    if not candidates:
-        candidates = list(df.columns)
-
-    def numeric_rate(col: str) -> float:
-        s = df[col].apply(normalize_text)
-        ok = 0
-        total = 0
-        for v in s.tolist():
-            if not v:
-                continue
-            total += 1
-            try:
-                float(v)
-                ok += 1
-            except Exception:
-                pass
-        return ok / max(total, 1)
-
-    scored = [(numeric_rate(c), c) for c in candidates]
-    scored.sort(reverse=True, key=lambda x: x[0])
-    best_rate, best_col = scored[0]
-
-    if best_rate < 0.60:
-        raise ValueError(
-            f"Could not confidently identify QTY column. "
-            f"Best candidate '{best_col}' numeric-rate={best_rate:.2f}. "
-            f"Candidates={candidates}"
-        )
-    return best_col
+    rule_store.append_rule(RULES_CSV, desc, mat, thk, strat)
 
 # ============================================================
 # Robust BOM reading (handles shifted right/down)
 # ============================================================
 
-def _trim_raw_bom(raw: pd.DataFrame) -> pd.DataFrame:
-    raw = raw.dropna(axis=0, how="all").dropna(axis=1, how="all")
-    if raw.shape[0] == 0 or raw.shape[1] == 0:
-        raise ValueError("BOM appears empty after removing blank rows/columns.")
-    return raw
-
-def _detect_header_row(raw: pd.DataFrame) -> tuple[int | None, int]:
-    header_keywords = ["part", "description", "desc", "qty", "quantity", "material"]
-    best_row = None
-    best_score = -1
-
-    for i in range(min(50, len(raw))):
-        row_vals = [normalize_text(v).lower() for v in raw.iloc[i].tolist()]
-        score = 0
-        for kw in header_keywords:
-            if any(kw in cell for cell in row_vals):
-                score += 1
-        if score > best_score:
-            best_score = score
-            best_row = i
-        if score >= 3:
-            best_row = i
-            break
-
-    return best_row, best_score
-
-def _finalize_bom_frame(raw: pd.DataFrame, source_label: str) -> pd.DataFrame:
-    raw = _trim_raw_bom(raw)
-    best_row, best_score = _detect_header_row(raw)
-
-    if best_row is None or best_score < 2:
-        preview = raw.head(10).to_string(index=False, header=False)
-        raise ValueError(
-            f"Could not confidently locate the header row in {source_label}.\n"
-            "Expected columns like Part/Description/Qty.\n\n"
-            f"Top of file preview:\n{preview}"
-        )
-
-    header = [normalize_text(v) for v in raw.iloc[best_row].tolist()]
-    df = raw.iloc[best_row + 1:].copy()
-    df.columns = header
-
-    df = df.loc[:, [c for c in df.columns if normalize_text(c) != ""]]
-    df = df.dropna(axis=0, how="all")
-    return df
-
 def read_bom(path: str) -> pd.DataFrame:
-    ext = os.path.splitext(path)[1].lower()
-
-    if ext == ".csv":
-        raw = pd.read_csv(path, header=None, engine="python")
-        return _finalize_bom_frame(raw, os.path.basename(path))
-
-    if ext == ".xlsx":
-        try:
-            sheets = pd.read_excel(path, header=None, sheet_name=None, engine="openpyxl")
-        except ImportError as exc:
-            raise RuntimeError(
-                "Reading .xlsx BOMs requires openpyxl.\n"
-                "Run: python -m pip install openpyxl"
-            ) from exc
-
-        best_candidate = None
-
-        for sheet_name, raw in sheets.items():
-            try:
-                trimmed = _trim_raw_bom(raw)
-            except ValueError:
-                continue
-
-            best_row, best_score = _detect_header_row(trimmed)
-            candidate = {
-                "sheet_name": sheet_name,
-                "raw": trimmed,
-                "best_score": best_score,
-            }
-            if best_candidate is None or candidate["best_score"] > best_candidate["best_score"]:
-                best_candidate = candidate
-
-        if best_candidate is None:
-            raise ValueError("Workbook appears empty across all sheets.")
-
-        return _finalize_bom_frame(
-            best_candidate["raw"],
-            f"{os.path.basename(path)} [{best_candidate['sheet_name']}]",
-        )
-
-    supported = ", ".join(sorted(SUPPORTED_BOM_EXTENSIONS))
-    raise ValueError(f"Unsupported BOM type: {ext}. Supported types: {supported}.")
+    return _read_bom(path, supported_extensions=SUPPORTED_BOM_EXTENSIONS)
 
 # ============================================================
 # PySide6: Stepped dialogs
 # ============================================================
 
-def _label(text: str, bold=False, wrap=True) -> QLabel:
-    lab = QLabel(text)
-    lab.setTextInteractionFlags(Qt.TextSelectableByMouse)
-    if wrap:
-        lab.setWordWrap(True)
-    if bold:
-        f = lab.font()
-        f.setBold(True)
-        lab.setFont(f)
-    return lab
-
-class MissingDxfDialog(QDialog):
-    """
-    Step through UNKNOWN missing-DXF descriptions and force a classification:
-      - Non-Laser: store FIRST TOKEN to nonlaser_tokens.csv
-      - Expected Laser: store FULL DESCRIPTION to expected_laser_descriptions.csv (+ optionally add material to laser_materials.csv)
-    Writes immediately to disk on each click.
-
-    Sanity feature: shows current Non-Laser token list from disk inside the dialog.
-    """
+class MissingDxfDialog(_MissingDxfDialog):
     def __init__(self, items: list[dict], parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("DXF Accountability: Missing DXF Classification")
-        self.setWindowModality(Qt.ApplicationModal)
-        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
-
-        self.items = items
-        self.i = 0
-
-        self.lbl_progress = _label("")
-        self.lbl_desc = _label("", bold=True)
-        self.lbl_token = _label("")
-        self.lbl_mat = _label("")
-        self.lbl_count = _label("")
-
-        note = (
-            "No DXF exists for this BOM entry.\n\n"
-            "• Mark as Non-Laser → stores FIRST TOKEN only (family-level) in nonlaser_tokens.csv\n"
-            "• Expected Laser → stores FULL DESCRIPTION (exact) in expected_laser_descriptions.csv\n"
-            "   and will be listed as an expected missing DXF in the final report.\n"
+        super().__init__(
+            items,
+            nonlaser_tokens_csv=NONLASER_TOKENS_CSV,
+            expected_laser_desc_csv=EXPECTED_LASER_DESC_CSV,
+            laser_materials_csv=LASER_MATERIALS_CSV,
+            load_set=load_set,
+            append_unique=append_unique,
+            parent=parent,
         )
-        self.lbl_note = _label(note)
 
-        self.chk_add_mat = QCheckBox("Also add this Material to known LASER materials (helps future missing-DXF checks)")
-        self.chk_add_mat.setChecked(False)
 
-        # --- Sanity panel: current non-laser token list (from disk)
-        self.lbl_nonlaser_title = _label("Current Non-Laser token list (from disk):", bold=True)
-        self.lbl_nonlaser_list = _label("", wrap=True)
-        self.lbl_nonlaser_list.setMinimumHeight(90)
-
-        self.btn_nonlaser = QPushButton("Mark as Non-Laser")
-        self.btn_expected = QPushButton("Expected Laser (DXF missing)")
-
-        self.btn_nonlaser.clicked.connect(self.choose_nonlaser)
-        self.btn_expected.clicked.connect(self.choose_expected)
-
-        btn_row = QHBoxLayout()
-        btn_row.addWidget(self.btn_nonlaser)
-        btn_row.addWidget(self.btn_expected)
-
-        lay = QVBoxLayout()
-        lay.addWidget(self.lbl_progress)
-        lay.addWidget(self.lbl_desc)
-        lay.addWidget(self.lbl_token)
-        lay.addWidget(self.lbl_mat)
-        lay.addWidget(self.lbl_count)
-        lay.addSpacing(8)
-        lay.addWidget(self.lbl_note)
-        lay.addWidget(self.chk_add_mat)
-        lay.addSpacing(10)
-        lay.addWidget(self.lbl_nonlaser_title)
-        lay.addWidget(self.lbl_nonlaser_list)
-        lay.addItem(QSpacerItem(10, 10, QSizePolicy.Minimum, QSizePolicy.Expanding))
-        lay.addLayout(btn_row)
-        self.setLayout(lay)
-
-        self.resize(760, 620)
-        self.load_step()
-
-    def _refresh_nonlaser_list(self):
-        toks = sorted(load_set(NONLASER_TOKENS_CSV, "Token"))
-        if not toks:
-            self.lbl_nonlaser_list.setText("(none yet)")
-            return
-        # Keep it readable: show all if small, else show first N with count
-        if len(toks) <= 40:
-            text = ", ".join(toks)
-        else:
-            text = ", ".join(toks[:40]) + f" ... (+{len(toks)-40} more)"
-        self.lbl_nonlaser_list.setText(text)
-
-    def load_step(self):
-        it = self.items[self.i]
-        desc = it["desc"]
-        tok = it["token"]
-        mat = it.get("material", "")
-        cnt = it.get("count", 0)
-
-        self.lbl_progress.setText(f"{self.i+1} of {len(self.items)}")
-        self.lbl_desc.setText(f"Description (full):\n{desc}")
-        self.lbl_token.setText(f"Non-laser family key (first token): {tok if tok else '(blank)'}")
-        self.lbl_mat.setText(f"Material (from BOM): {mat if mat else '(blank)'}")
-        self.lbl_count.setText(f"Occurrences (missing DXF): {cnt}")
-
-        known_laser_mats = load_set(LASER_MATERIALS_CSV, "Material")
-        if mat and (mat not in known_laser_mats):
-            self.chk_add_mat.setEnabled(True)
-            self.chk_add_mat.setChecked(True)
-        else:
-            self.chk_add_mat.setEnabled(False)
-            self.chk_add_mat.setChecked(False)
-
-        self._refresh_nonlaser_list()
-
-    def choose_nonlaser(self):
-        it = self.items[self.i]
-        tok = it["token"]
-        if not tok:
-            QMessageBox.critical(self, "Missing token", "Cannot classify as non-laser because the first token is blank.")
-            return
-        append_unique(NONLASER_TOKENS_CSV, ["Token"], [tok])
-        self.next_step()
-
-    def choose_expected(self):
-        it = self.items[self.i]
-        desc = it["desc"]
-        mat = it.get("material", "")
-
-        append_unique(EXPECTED_LASER_DESC_CSV, ["Description"], [desc])
-        if mat and self.chk_add_mat.isEnabled() and self.chk_add_mat.isChecked():
-            append_unique(LASER_MATERIALS_CSV, ["Material"], [mat])
-        self.next_step()
-
-    def next_step(self):
-        self.i += 1
-        if self.i >= len(self.items):
-            self.accept()
-        else:
-            self.load_step()
-
-class RadanRuleDialog(QDialog):
-    """
-    Step through missing RADAN rules (for descriptions that DO have DXFs).
-    Writes immediately to description_rules.csv on each Save.
-    """
+class RadanRuleDialog(_RadanRuleDialog):
     def __init__(self, descs: list[str], ftq_descs: set[str], parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Define RADAN Rule (by Description)")
-        self.setWindowModality(Qt.ApplicationModal)
-        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
-
-        self.descs = descs
-        self.ftq_descs = ftq_descs
-        self.i = 0
-
-        self.lbl_progress = _label("")
-        self.lbl_desc = _label("", bold=True)
-
-        self.inp_mat = QLineEdit()
-        self.inp_thk = QLineEdit()
-        self.inp_strat = QLineEdit()
-
-        self.lbl_mat = _label("Material:")
-        self.lbl_thk = _label("Thickness:")
-        self.lbl_strat = _label("Strategy:")
-
-        form = QVBoxLayout()
-        row1 = QHBoxLayout(); row1.addWidget(self.lbl_mat); row1.addWidget(self.inp_mat)
-        row2 = QHBoxLayout(); row2.addWidget(self.lbl_thk); row2.addWidget(self.inp_thk)
-        row3 = QHBoxLayout(); row3.addWidget(self.lbl_strat); row3.addWidget(self.inp_strat)
-        form.addLayout(row1); form.addLayout(row2); form.addLayout(row3)
-
-        self.btn_save = QPushButton("Save & Next")
-        self.btn_save.clicked.connect(self.save_next)
-
-        lay = QVBoxLayout()
-        lay.addWidget(self.lbl_progress)
-        lay.addWidget(self.lbl_desc)
-        lay.addSpacing(8)
-        lay.addLayout(form)
-        lay.addItem(QSpacerItem(10, 10, QSizePolicy.Minimum, QSizePolicy.Expanding))
-        lay.addWidget(self.btn_save)
-        self.setLayout(lay)
-
-        self.resize(640, 360)
-        self.load_step()
-
-    def load_step(self):
-        desc = self.descs[self.i]
-        self.lbl_progress.setText(f"{self.i+1} of {len(self.descs)}")
-        self.lbl_desc.setText(f"Description:\n{desc}")
-
-        self.inp_mat.setText("")
-        self.inp_thk.setText("")
-        self.inp_strat.setText("")
-
-        if desc in self.ftq_descs:
-            self.inp_mat.setText("Aluminum 3003 CHK FTQ")
-            self.inp_mat.setEnabled(False)
-        else:
-            self.inp_mat.setEnabled(True)
-
-    def save_next(self):
-        desc = self.descs[self.i]
-        mat = self.inp_mat.text().strip()
-        thk = self.inp_thk.text().strip()
-        strat = self.inp_strat.text().strip()
-
-        if not mat or not thk or not strat:
-            QMessageBox.critical(self, "Missing data", "Material, Thickness, and Strategy are all required.")
-            return
-
-        append_rule(desc, mat, thk, strat)
-
-        self.i += 1
-        if self.i >= len(self.descs):
-            self.accept()
-        else:
-            self.load_step()
-
-
-class ReportReviewDialog(QDialog):
-    REVIEW_SECTION_LEVELS = {
-        "Expected laser but missing DXF": "red",
-        "Orphan DXFs": "yellow",
-        "DXFs missing PDFs": "yellow",
-        "Non-laser parts": "yellow",
-    }
-
-    def __init__(self, result: InventorToRadanResult, parent=None):
-        super().__init__(parent)
-        self.result = result
-        self._acknowledged = False
-        self.rejected_without_ack = False
-        self.setWindowTitle("Review Inventor-to-RADAN Report")
-        self.setWindowModality(Qt.ApplicationModal)
-        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
-
-        title = _label("Review required before production use", bold=True)
-        warning_count = (
-            len(result.expected_missing_dxfs)
-            + len(result.orphan_dxfs)
-            + len(result.missing_pdfs)
-            + len(result.nonlaser_parts)
+        super().__init__(
+            descs,
+            ftq_descs,
+            append_rule=append_rule,
+            parent=parent,
         )
-        critical_count = len(result.expected_missing_dxfs)
-        if critical_count:
-            detail_text = (
-                f"This report contains {critical_count} critical item(s) and "
-                f"{warning_count - critical_count} review item(s). "
-                "Read the report below before acknowledging completion."
-            )
-            detail_style = "color: #B91C1C;"
-        elif warning_count:
-            detail_text = (
-                f"This report contains {warning_count} item(s) to check. "
-                "Read the yellow sections below before acknowledging completion."
-            )
-            detail_style = "color: #A16207;"
-        else:
-            detail_text = (
-                "No report warnings were found. Review the green confirmation sections before closing this conversion."
-            )
-            detail_style = "color: #15803D;"
-        detail = _label(detail_text, bold=True)
-        detail.setStyleSheet(detail_style)
-
-        path_label = _label(f"Report: {result.report_path}")
-
-        self.viewer = QTextEdit()
-        self.viewer.setReadOnly(True)
-        self.viewer.setLineWrapMode(QTextEdit.NoWrap)
-        try:
-            report_text = open(result.report_path, encoding="utf-8").read()
-        except OSError as exc:
-            report_text = f"Could not read report file:\n{exc}"
-        self.viewer.setHtml(self._report_html(report_text))
-
-        self.chk_ack = QCheckBox("I have reviewed this report and understand any warnings before production.")
-        self.chk_ack.stateChanged.connect(self._update_ack_button)
-
-        self.btn_open = QPushButton("Open Report File")
-        self.btn_open.clicked.connect(self.open_report)
-        self.btn_ack = QPushButton("Acknowledge Report")
-        self.btn_ack.setEnabled(False)
-        self.btn_ack.clicked.connect(self.accept)
-        self.btn_discard = QPushButton("Discard CSV/Report")
-        self.btn_discard.clicked.connect(self.reject)
-
-        btn_row = QHBoxLayout()
-        btn_row.addWidget(self.btn_open)
-        btn_row.addWidget(self.btn_discard)
-        btn_row.addWidget(self.btn_ack)
-
-        lay = QVBoxLayout()
-        lay.addWidget(title)
-        lay.addWidget(detail)
-        lay.addWidget(path_label)
-        lay.addWidget(self.viewer, 1)
-        lay.addWidget(self.chk_ack)
-        lay.addLayout(btn_row)
-        self.setLayout(lay)
-        self.resize(920, 680)
-
-    @classmethod
-    def _report_html(cls, report_text: str) -> str:
-        colors = {
-            "base": "#111827",
-            "muted": "#475569",
-            "green": "#15803D",
-            "yellow": "#A16207",
-            "red": "#B91C1C",
-        }
-        active_level = ""
-        rows: list[str] = []
-        for line in report_text.splitlines():
-            stripped = line.strip()
-            if stripped.endswith(":"):
-                active_level = ""
-                for section, level in cls.REVIEW_SECTION_LEVELS.items():
-                    if stripped.startswith(section):
-                        active_level = level
-                        break
-                color = colors.get(active_level, colors["base"])
-                weight = "700" if active_level else "600"
-            elif stripped == "(none)" and active_level:
-                color = colors["green"]
-                weight = "700"
-            elif stripped and active_level:
-                color = colors[active_level]
-                weight = "700"
-            elif stripped:
-                color = colors["base"]
-                weight = "400"
-            else:
-                color = colors["muted"]
-                weight = "400"
-            rows.append(
-                "<div style='white-space: pre-wrap; "
-                f"color: {color}; font-weight: {weight};'>"
-                f"{html.escape(line) or '&nbsp;'}</div>"
-            )
-        body = "\n".join(rows)
-        return (
-            "<html><body style='font-family: Consolas, monospace; "
-            "font-size: 10pt; background: #FFFFFF;'>"
-            f"{body}</body></html>"
-        )
-
-    def _update_ack_button(self):
-        self.btn_ack.setEnabled(self.chk_ack.isChecked())
-
-    def open_report(self):
-        try:
-            os.startfile(self.result.report_path)  # type: ignore[attr-defined]
-        except Exception as exc:
-            QMessageBox.warning(self, "Open Report", str(exc))
-
-    def accept(self):
-        if not self.chk_ack.isChecked():
-            QMessageBox.warning(
-                self,
-                "Review Required",
-                "Review the report and check the acknowledgement before continuing.",
-            )
-            return
-        self._acknowledged = True
-        super().accept()
-
-    def reject(self):
-        if not self._acknowledged:
-            choice = QMessageBox.question(
-                self,
-                "Discard Inventor Output?",
-                "Close without acknowledging this report?\n\n"
-                "The generated RADAN CSV and report will be deleted.",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if choice != QMessageBox.Yes:
-                return
-            self.rejected_without_ack = True
-            super().reject()
-            return
-        super().reject()
-
-    def closeEvent(self, event):
-        if self._acknowledged:
-            event.accept()
-            return
-        choice = QMessageBox.question(
-            self,
-            "Discard Inventor Output?",
-            "Close without acknowledging this report?\n\n"
-            "The generated RADAN CSV and report will be deleted.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if choice == QMessageBox.Yes:
-            self.rejected_without_ack = True
-            event.accept()
-            return
-        event.ignore()
 
 # ============================================================
 # Core logic
@@ -761,54 +195,6 @@ def compute_nonlaser_parts(df: pd.DataFrame) -> list[str]:
         if part and tok and tok in nonlaser_tokens:
             out.append(part)
     return sorted(set(out))
-
-def write_report(report_path: str,
-                 bom_path: str,
-                 out_path: str,
-                 added_count: int,
-                 expected_missing_dxfs: list[str],
-                 orphan_dxfs: set[str],
-                 missing_pdfs: set[str],
-                 nonlaser_parts: list[str]) -> None:
-    with open(report_path, "w", encoding="utf-8") as f:
-        f.write(f"BOM: {bom_path}\n")
-        f.write(f"Folder: {os.path.dirname(bom_path)}\n")
-        f.write(f"RADAN output: {out_path}\n")
-        f.write("\n")
-        f.write(f"Added to RADAN (rows): {added_count}\n")
-        f.write("\n")
-
-        f.write("Expected laser but missing DXF (likely deleted / missing):\n")
-        if expected_missing_dxfs:
-            for name in expected_missing_dxfs:
-                f.write(f"  {name}\n")
-        else:
-            f.write("  (none)\n")
-        f.write("\n")
-
-        f.write("Orphan DXFs (in folder but not referenced by BOM):\n")
-        if orphan_dxfs:
-            for name in sorted(orphan_dxfs):
-                f.write(f"  {name}\n")
-        else:
-            f.write("  (none)\n")
-        f.write("\n")
-
-        f.write("DXFs missing PDFs:\n")
-        if missing_pdfs:
-            for base_name in sorted(missing_pdfs):
-                f.write(f"  {base_name}.dxf (missing {base_name}.pdf)\n")
-        else:
-            f.write("  (none)\n")
-        f.write("\n")
-
-        f.write("Non-laser parts (no DXF; token-classified):\n")
-        if nonlaser_parts:
-            for p in nonlaser_parts:
-                f.write(f"  {p}\n")
-        else:
-            f.write("  (none)\n")
-        f.write("\n")
 
 def ensure_config_csvs() -> None:
     ensure_dir(TOOLS_DIR)
