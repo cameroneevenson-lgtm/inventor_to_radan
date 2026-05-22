@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import importlib.util
 import shutil
 import sys
 import unittest
@@ -13,6 +14,7 @@ if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
 
 import inventor_to_radan
+import inline_runner
 
 TEST_TMP_ROOT = PROJECT_DIR / "_tmp_tests"
 
@@ -84,6 +86,101 @@ class InventorToRadanTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.missing_rules, ["NEW LASER PANEL"])
         self.assertEqual(raised.exception.missing_dxf_items, [])
+
+    def test_inline_runner_loads_sibling_modules_with_foreign_dialogs_loaded(self) -> None:
+        saved_path = list(sys.path)
+        saved_modules = {
+            name: sys.modules[name]
+            for name in list(sys.modules)
+            if name in inline_runner.INLINE_IMPORT_NAMES or name.startswith("dialogs.")
+        }
+        try:
+            for name in saved_modules:
+                sys.modules.pop(name, None)
+
+            foreign_root = self.temp_dir / "foreign"
+            foreign_dialogs = foreign_root / "dialogs"
+            foreign_dialogs.mkdir(parents=True)
+            (foreign_dialogs / "__init__.py").write_text("ORIGIN = 'foreign'\n", encoding="utf-8")
+            sys.path.insert(0, str(foreign_root))
+            foreign_module = __import__("dialogs")
+            self.assertEqual(foreign_module.ORIGIN, "foreign")
+
+            tool_dir = self.temp_dir / "tool"
+            tool_dialogs = tool_dir / "dialogs"
+            tool_dialogs.mkdir(parents=True)
+            spreadsheet = self.temp_dir / "bom.csv"
+            spreadsheet.write_text("Part Number,Description,Qty\n", encoding="utf-8")
+            (tool_dir / "bom_reader.py").write_text("ADDED_COUNT = 7\n", encoding="utf-8")
+            (tool_dialogs / "__init__.py").write_text("", encoding="utf-8")
+            (tool_dialogs / "missing_dxf_dialog.py").write_text("VALUE = 'inventor'\n", encoding="utf-8")
+            entry = tool_dir / "inventor_to_radan.py"
+            entry.write_text(
+                "import bom_reader\n"
+                "from dialogs.missing_dxf_dialog import VALUE\n"
+                "from types import SimpleNamespace\n"
+                "def convert_bom_to_radan_csv(path, *, allow_prompts, show_summary):\n"
+                "    if allow_prompts or show_summary:\n"
+                "        raise AssertionError('inline mode should not prompt')\n"
+                "    return SimpleNamespace(added_count=bom_reader.ADDED_COUNT, dialog_value=VALUE, bom_path=path)\n",
+                encoding="utf-8",
+            )
+
+            result = inline_runner.run_inline(entry, spreadsheet, allow_prompts=False, show_summary=False)
+
+            self.assertEqual(result.added_count, 7)
+            self.assertEqual(result.dialog_value, "inventor")
+            self.assertEqual(result.bom_path, str(spreadsheet))
+            self.assertIs(sys.modules.get("dialogs"), foreign_module)
+            self.assertNotIn("dialogs.missing_dxf_dialog", sys.modules)
+        finally:
+            sys.path[:] = saved_path
+            for name in [name for name in sys.modules if name in inline_runner.INLINE_IMPORT_NAMES or name.startswith("dialogs.")]:
+                sys.modules.pop(name, None)
+            sys.modules.update(saved_modules)
+
+    def test_inventor_module_loads_from_spec_without_project_on_sys_path(self) -> None:
+        saved_path = list(sys.path)
+        saved_modules = {
+            name: sys.modules[name]
+            for name in list(sys.modules)
+            if name in inline_runner.INLINE_IMPORT_NAMES or name.startswith("dialogs.")
+        }
+        module_name = "_inventor_to_radan_spec_probe"
+        saved_probe = sys.modules.get(module_name)
+
+        def is_project_path(path_text: str) -> bool:
+            try:
+                candidate = Path(path_text or ".").resolve()
+            except OSError:
+                return False
+            return candidate == PROJECT_DIR.resolve()
+
+        try:
+            sys.path[:] = [path for path in sys.path if not is_project_path(path)]
+            for name in saved_modules:
+                sys.modules.pop(name, None)
+            sys.modules.pop(module_name, None)
+
+            spec = importlib.util.spec_from_file_location(module_name, PROJECT_DIR / "inventor_to_radan.py")
+            self.assertIsNotNone(spec)
+            assert spec is not None
+            self.assertIsNotNone(spec.loader)
+            assert spec.loader is not None
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            spec.loader.exec_module(module)
+
+            self.assertTrue(callable(getattr(module, "convert_bom_to_radan_csv", None)))
+        finally:
+            sys.path[:] = saved_path
+            for name in [name for name in sys.modules if name in inline_runner.INLINE_IMPORT_NAMES or name.startswith("dialogs.")]:
+                sys.modules.pop(name, None)
+            sys.modules.update(saved_modules)
+            if saved_probe is not None:
+                sys.modules[module_name] = saved_probe
+            else:
+                sys.modules.pop(module_name, None)
 
 
 if __name__ == "__main__":

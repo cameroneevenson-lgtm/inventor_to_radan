@@ -2,6 +2,10 @@ import os
 import sys
 from dataclasses import dataclass
 
+TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
+if TOOL_DIR not in sys.path:
+    sys.path.insert(0, TOOL_DIR)
+
 # ============================================================
 # Optional dependencies
 # ============================================================
