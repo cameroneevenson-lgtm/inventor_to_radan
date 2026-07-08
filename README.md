@@ -1,4 +1,4 @@
-# Inventor to Radan (v1.0)
+# Inventor to Radan
 
 Convert an Inventor BOM (`.csv` or `.xlsx`) into a Radan import CSV, with DXF accountability checks and a text report.
 
@@ -14,16 +14,28 @@ Convert an Inventor BOM (`.csv` or `.xlsx`) into a Radan import CSV, with DXF ac
 - Generates:
   - Radan output CSV (`*_Radan.csv`)
   - Audit report (`*_report.txt`)
+- After generating, opens a mandatory Report Review dialog. Choosing "Discard" deletes the just-written `*_Radan.csv` and `*_report.txt`; the run is not considered complete until the operator accepts or discards.
+- Parts listed in `ftq_parts.csv` have their output `MATERIAL` forced to `Aluminum 3003 CHK FTQ` regardless of the matched description rule.
 
 ## Project files
 
-- `inventor_to_radan.py` - main application logic and dialogs (PySide6)
+- `inventor_to_radan.py` - main application logic (PySide6)
+- `config.py` - paths and constants
+- `bom_reader.py` - BOM column detection and value coercion
+- `rule_store.py` - description-rule CSV load/save
+- `report_writer.py` - audit report generation
+- `inline_runner.py` - headless/programmatic entry point (see "Programmatic use" below)
+- `dialogs/` - `missing_dxf_dialog.py`, `radan_rule_dialog.py`, `report_review_dialog.py`
 - `inventor_to_radan.bat` - launcher script
 - `description_rules.csv` - per-description Radan rule table
-- `ftq_parts.csv` - FTQ part numbers
+- `ftq_parts.csv` - FTQ part numbers whose material is forced to `Aluminum 3003 CHK FTQ`
 - `nonlaser_tokens.csv` - non-laser family tokens
 - `expected_laser_descriptions.csv` - descriptions expected to be laser-cut
 - `laser_materials.csv` - known laser materials
+
+## Programmatic use
+
+`inline_runner.run_inline()` and `convert_bom_to_radan_csv()` (`inventor_to_radan.py`) provide a headless conversion path with no dialogs, used by the sibling app `truck_nest_explorer` (`services.py` `run_inventor_to_radan_inline`, called with `allow_prompts=False, show_summary=False`). Passing `allow_prompts=False` skips the missing-DXF/missing-rule prompts and the Report Review gate; callers get `InventorToRadanNeedsUi`, `InventorToRadanCancelled`, or `InventorToRadanReportRejected` raised instead.
 
 ## Requirements
 
@@ -67,7 +79,7 @@ Outputs are written to the same folder as the BOM input:
 - `<BOM_NAME>_Radan.csv`
 - `<BOM_NAME>_report.txt`
 
-Radan CSV columns are fixed in this order:
+The Radan CSV has **no header row**; columns are written in this fixed order:
 
 - `FILE, QTY, MATERIAL, THICKNESS, UNIT, STRATEGY`
 
@@ -79,7 +91,4 @@ Radan CSV columns are fixed in this order:
   - DXF exists,
   - quantity > 0,
   - a description rule exists.
-
-## Version
-
-- `v1.0` - stable production version.
+- Set `PAUSE_ON_START=1` to pause for a keypress before running (debugging aid).
