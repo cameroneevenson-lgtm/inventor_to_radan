@@ -17,7 +17,6 @@ except ImportError:
     sys.exit(1)
 
 try:
-    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import (
         QApplication, QDialog, QMessageBox
     )
@@ -26,9 +25,6 @@ except ImportError:
     sys.exit(1)
 
 from bom_reader import (
-    _detect_header_row,
-    _finalize_bom_frame,
-    _trim_raw_bom,
     choose_qty_col,
     find_col,
     first_token,
@@ -48,7 +44,7 @@ from config import (
     SUPPORTED_BOM_EXTENSIONS,
     TOOLS_DIR,
 )
-from dialogs.missing_dxf_dialog import MissingDxfDialog as _MissingDxfDialog, make_label as _label
+from dialogs.missing_dxf_dialog import MissingDxfDialog as _MissingDxfDialog
 from dialogs.radan_rule_dialog import RadanRuleDialog as _RadanRuleDialog
 from dialogs.report_review_dialog import ReportReviewDialog
 from report_writer import write_report
