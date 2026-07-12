@@ -169,7 +169,7 @@ def compute_expected_missing_dxfs(df: pd.DataFrame) -> list[str]:
     laser_mats = {m.lower() for m in load_set(LASER_MATERIALS_CSV, "Material")}
 
     missing: list[str] = []
-    nodxf = df[df["_HasDxf"] == False]
+    nodxf = df[~df["_HasDxf"]]
     for _, r in nodxf.iterrows():
         part = r["_Part"]
         desc = r["_Desc"]
@@ -192,7 +192,7 @@ def compute_nonlaser_parts(df: pd.DataFrame) -> list[str]:
     """
     nonlaser_tokens = {t.lower() for t in load_set(NONLASER_TOKENS_CSV, "Token")}
     out: list[str] = []
-    nodxf = df[df["_HasDxf"] == False]
+    nodxf = df[~df["_HasDxf"]]
     for _, r in nodxf.iterrows():
         part = r["_Part"]
         tok = first_token(r["_Desc"]).lower()
@@ -250,7 +250,7 @@ def learn_laser_materials(df: pd.DataFrame) -> None:
 
 
 def collect_missing_dxf_prompt_items(df: pd.DataFrame) -> list[dict]:
-    missing_df = df[df["_HasDxf"] == False].copy()
+    missing_df = df[~df["_HasDxf"]].copy()
     prompt_items: list[dict] = []
 
     if len(missing_df) > 0:
@@ -297,7 +297,7 @@ def collect_missing_dxf_prompt_items(df: pd.DataFrame) -> list[dict]:
 
 
 def collect_missing_rules(df: pd.DataFrame, rules: dict[str, dict]) -> list[str]:
-    laser_descs = sorted(set(df.loc[df["_HasDxf"] == True, "_Desc"].tolist()))
+    laser_descs = sorted(set(df.loc[df["_HasDxf"], "_Desc"].tolist()))
     return [d for d in laser_descs if d and d not in rules]
 
 
