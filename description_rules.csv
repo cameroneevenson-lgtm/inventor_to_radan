@@ -33,6 +33,5 @@ Description,Material,Thickness,Strategy
 "PLATE, AL ALY, 0.500 in THK, 5052",Aluminum 5052,.5,Air
 "SHEET, AL ALY, .125"" THK, 5052 H31",Aluminum 5052,0.12,AIR
 "AL 1/8"" 2.2 mm",Aluminum 5052,0.12,AIR
-Front Cover,Aluminum 5052,0.12,Air
 "PLATE, SS, .375"" THK, 304",Stainless Steel,0.375,N2
 "SHEET, SS, .25"" THK, 304",Stainless Steel,0.250,N2
