@@ -35,3 +35,4 @@ Description,Material,Thickness,Strategy
 "AL 1/8"" 2.2 mm",Aluminum 5052,0.12,AIR
 "PLATE, SS, .375"" THK, 304",Stainless Steel,0.375,N2
 "SHEET, SS, .25"" THK, 304",Stainless Steel,0.250,N2
+"PLATE, MS, .625"" THK, 44W",Mild Steel-A36,0.63,O2
