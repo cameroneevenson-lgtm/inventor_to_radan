@@ -5,12 +5,12 @@ Convert an Inventor BOM (`.csv` or `.xlsx`) into a Radan import CSV, with DXF ac
 ## What this tool does
 
 - Reads BOM data from CSV or Excel (`.xlsx`).
-- Detects key BOM columns (Part, Description, Quantity, optional Material).
+- Detects key BOM columns (Part, Description, Quantity).
 - Checks whether each `PartNumber.dxf` exists in the BOM folder.
 - Prompts for missing DXF classification:
   - Non-laser (stores first token in `nonlaser_tokens.csv`)
-  - Expected laser but missing DXF (stores full description)
-- Prompts for missing Radan rules for descriptions that do have DXFs.
+  - Expected laser but missing DXF (collects a complete RADAN rule)
+- Prompts for missing RADAN rules for descriptions that have DXFs or were classified as expected laser.
 - Generates:
   - Radan output CSV (`*_Radan.csv`)
   - Audit report (`*_report.txt`)
@@ -30,8 +30,6 @@ Convert an Inventor BOM (`.csv` or `.xlsx`) into a Radan import CSV, with DXF ac
 - `description_rules.csv` - per-description Radan rule table
 - `ftq_parts.csv` - FTQ part numbers whose material is forced to `Aluminum 3003 CHK FTQ`
 - `nonlaser_tokens.csv` - non-laser family tokens
-- `expected_laser_descriptions.csv` - descriptions expected to be laser-cut
-- `laser_materials.csv` - known laser materials
 
 ## Programmatic use
 
@@ -91,4 +89,5 @@ The Radan CSV has **no header row**; columns are written in this fixed order:
   - DXF exists,
   - quantity > 0,
   - a description rule exists.
+- Production Inventor BOMs do not provide a Material column; output material and strategy are resolved from `description_rules.csv` by Description. Its `Description` column is also the single list of known laser descriptions.
 - Set `PAUSE_ON_START=1` to pause for a keypress before running (debugging aid).

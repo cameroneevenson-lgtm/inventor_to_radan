@@ -33,9 +33,7 @@ from bom_reader import (
     to_int,
 )
 from config import (
-    EXPECTED_LASER_DESC_CSV,
     FTQ_CSV,
-    LASER_MATERIALS_CSV,
     NONLASER_TOKENS_CSV,
     RADAN_COL_ORDER,
     RADAN_OUTPUT_SUFFIX,
@@ -132,8 +130,6 @@ class MissingDxfDialog(_MissingDxfDialog):
         super().__init__(
             items,
             nonlaser_tokens_csv=NONLASER_TOKENS_CSV,
-            expected_laser_desc_csv=EXPECTED_LASER_DESC_CSV,
-            laser_materials_csv=LASER_MATERIALS_CSV,
             load_set=load_set,
             append_unique=append_unique,
             parent=parent,
@@ -155,14 +151,12 @@ class RadanRuleDialog(_RadanRuleDialog):
 
 def compute_expected_missing_dxfs(df: pd.DataFrame) -> list[str]:
     """
-    Expected missing = (full Description in expected_laser_descriptions.csv OR Material in laser_materials.csv)
-    AND NOT (first token in nonlaser_tokens.csv)
-    for rows with no DXF.
+    For rows with no DXF, expected missing = full Description in column A of
+    description_rules.csv AND NOT first token in nonlaser_tokens.csv.
     Returns sorted unique list of "PartNumber.dxf" names.
     """
-    expected_desc = load_set(EXPECTED_LASER_DESC_CSV, "Description")
+    expected_desc = set(load_rules())
     nonlaser_tokens = {t.lower() for t in load_set(NONLASER_TOKENS_CSV, "Token")}
-    laser_mats = {m.lower() for m in load_set(LASER_MATERIALS_CSV, "Material")}
 
     missing: list[str] = []
     nodxf = df[~df["_HasDxf"]]
@@ -170,13 +164,11 @@ def compute_expected_missing_dxfs(df: pd.DataFrame) -> list[str]:
         part = r["_Part"]
         desc = r["_Desc"]
         tok = first_token(desc).lower()
-        mat = (r["_Mat"] or "").lower()
 
         if tok and tok in nonlaser_tokens:
             continue
 
-        is_expected = (desc in expected_desc) or (mat and (mat in laser_mats))
-        if is_expected and part:
+        if desc in expected_desc and part:
             missing.append(f"{part}.dxf")
 
     return sorted(set(missing))
@@ -201,8 +193,6 @@ def ensure_config_csvs() -> None:
     ensure_csv(RULES_CSV, ["Description", "Material", "Thickness", "Strategy"])
     ensure_csv(FTQ_CSV, ["PartNumber"])
     ensure_csv(NONLASER_TOKENS_CSV, ["Token"])
-    ensure_csv(EXPECTED_LASER_DESC_CSV, ["Description"])
-    ensure_csv(LASER_MATERIALS_CSV, ["Material"])
 
 
 def prepare_bom_dataframe(bom_path: str) -> tuple[pd.DataFrame, str]:
@@ -216,16 +206,10 @@ def prepare_bom_dataframe(bom_path: str) -> tuple[pd.DataFrame, str]:
     desc_col = find_col(df, ["description", "desc"])
     qty_col = choose_qty_col(df)
 
-    try:
-        mat_col = find_col(df, ["material"])
-    except Exception:
-        mat_col = None
-
     # ---- Normalize fields
     df["_Part"] = df[part_col].apply(normalize_text)
     df["_Desc"] = df[desc_col].apply(normalize_text)
     df["_Qty"]  = df[qty_col].apply(to_int)
-    df["_Mat"]  = df[mat_col].apply(normalize_text) if mat_col else ""
 
     # ---- DXF existence (BOM folder)
     def has_dxf(part: str) -> bool:
@@ -237,14 +221,6 @@ def prepare_bom_dataframe(bom_path: str) -> tuple[pd.DataFrame, str]:
     return df, base_dir
 
 
-def learn_laser_materials(df: pd.DataFrame) -> None:
-    if "_Mat" not in df.columns:
-        return
-    for m, hd in zip(df["_Mat"].tolist(), df["_HasDxf"].tolist()):
-        if hd and m:
-            append_unique(LASER_MATERIALS_CSV, ["Material"], [m])
-
-
 def collect_missing_dxf_prompt_items(df: pd.DataFrame) -> list[dict]:
     missing_df = df[~df["_HasDxf"]].copy()
     prompt_items: list[dict] = []
@@ -252,11 +228,9 @@ def collect_missing_dxf_prompt_items(df: pd.DataFrame) -> list[dict]:
     if len(missing_df) > 0:
         grouped = missing_df.groupby("_Desc", dropna=False)
 
-        expected_desc = load_set(EXPECTED_LASER_DESC_CSV, "Description")
+        expected_desc = set(load_rules())
         nonlaser_tokens = load_set(NONLASER_TOKENS_CSV, "Token")
-        laser_mats = load_set(LASER_MATERIALS_CSV, "Material")
         nonlaser_tokens_l = {t.lower() for t in nonlaser_tokens}
-        laser_mats_l = {m.lower() for m in laser_mats}
 
         for desc, g in grouped:
             desc = normalize_text(desc)
@@ -264,20 +238,15 @@ def collect_missing_dxf_prompt_items(df: pd.DataFrame) -> list[dict]:
                 continue
 
             tok_l = first_token(desc).lower()
-            mats = {normalize_text(m) for m in g["_Mat"].tolist() if normalize_text(m)}
 
             if desc in expected_desc:
                 continue
             if tok_l and tok_l in nonlaser_tokens_l:
                 continue
-            if mats and any(m.lower() in laser_mats_l for m in mats):
-                continue
 
-            sample_mat = sorted(mats)[0] if mats else ""
             prompt_items.append({
                 "desc": desc,
                 "token": first_token(desc),
-                "material": sample_mat,
                 "count": int(len(g)),
             })
 
@@ -402,43 +371,6 @@ def write_radan_outputs(
     )
 
 
-def build_summary_message(result: InventorToRadanResult) -> str:
-    msg_lines = [
-        f"Added {result.added_count} rows to RADAN output:",
-        result.out_path,
-        "",
-        "Wrote report:",
-        result.report_path,
-    ]
-
-    if result.expected_missing_dxfs:
-        preview = list(result.expected_missing_dxfs[:20])
-        more = len(result.expected_missing_dxfs) - len(preview)
-        msg_lines += ["", "Expected DXFs missing (showing up to 20):"]
-        msg_lines += preview
-        if more > 0:
-            msg_lines += [f"... (+{more} more)"]
-    else:
-        msg_lines += ["", "Expected DXFs missing: (none)"]
-
-    if result.orphan_dxfs:
-        msg_lines += ["", f"Orphan DXFs (in folder, not in BOM): {len(result.orphan_dxfs)} (see report)"]
-    else:
-        msg_lines += ["", "Orphan DXFs: (none)"]
-
-    if result.missing_pdfs:
-        msg_lines += [f"DXFs missing PDFs: {len(result.missing_pdfs)} (see report)"]
-    else:
-        msg_lines += ["DXFs missing PDFs: (none)"]
-
-    if result.nonlaser_parts:
-        msg_lines += ["", f"Non-laser parts (no DXF): {len(result.nonlaser_parts)} (see report)"]
-    else:
-        msg_lines += ["", "Non-laser parts (no DXF): (none)"]
-
-    return "\n".join(msg_lines)
-
-
 def delete_generated_outputs(result: InventorToRadanResult) -> tuple[str, ...]:
     failed: list[str] = []
     for path in (result.out_path, result.report_path):
@@ -462,13 +394,11 @@ def convert_bom_to_radan_csv(
     # ---- Persistence (disk)
     ftq_parts = load_set(FTQ_CSV, "PartNumber")
 
-    # ---- Learn laser materials from DXF-present rows (trust BOM)
-    learn_laser_materials(df)
-
     # ============================================================
     # DXF Accountability: classify unknown missing-DXF descriptions
     # ============================================================
 
+    expected_missing_rules: list[str] = []
     prompt_unique = collect_missing_dxf_prompt_items(df)
     if prompt_unique:
         if not allow_prompts:
@@ -476,6 +406,7 @@ def convert_bom_to_radan_csv(
         dlg = MissingDxfDialog(prompt_unique)
         if dlg.exec() != QDialog.Accepted:
             raise InventorToRadanCancelled()
+        expected_missing_rules = dlg.expected_descriptions
 
     # ============================================================
     # RADAN rules: prompt only for descriptions that have DXFs
@@ -483,7 +414,7 @@ def convert_bom_to_radan_csv(
 
     rules = load_rules()
     ftq_descs = set(df.loc[df["_Part"].isin(ftq_parts), "_Desc"].tolist())
-    missing_rules = collect_missing_rules(df, rules)
+    missing_rules = sorted(set(collect_missing_rules(df, rules)) | set(expected_missing_rules))
 
     if missing_rules:
         if not allow_prompts:
@@ -541,5 +472,3 @@ if __name__ == "__main__":
         QMessageBox.critical(None, "Error", f"{type(e).__name__}: {e}")
         rc = 1
     sys.exit(rc)
-
-

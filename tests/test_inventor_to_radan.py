@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import csv
 import importlib.util
-import shutil
 import sys
+import tempfile
 import unittest
-import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,19 +15,15 @@ if str(PROJECT_DIR) not in sys.path:
 import inventor_to_radan
 import inline_runner
 
-TEST_TMP_ROOT = PROJECT_DIR / "_tmp_tests"
-
-
 class InventorToRadanTests(unittest.TestCase):
     def setUp(self) -> None:
-        TEST_TMP_ROOT.mkdir(parents=True, exist_ok=True)
-        self.temp_dir = TEST_TMP_ROOT / uuid.uuid4().hex
-        self.temp_dir.mkdir(parents=True, exist_ok=True)
+        self._temp_context = tempfile.TemporaryDirectory(prefix="inventor_to_radan_")
+        self.temp_dir = Path(self._temp_context.name)
         self.config_dir = self.temp_dir / "config"
         self.config_dir.mkdir()
 
     def tearDown(self) -> None:
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
+        self._temp_context.cleanup()
 
     def patch_config_paths(self):
         return patch.multiple(
@@ -36,20 +31,18 @@ class InventorToRadanTests(unittest.TestCase):
             RULES_CSV=str(self.config_dir / "description_rules.csv"),
             FTQ_CSV=str(self.config_dir / "ftq_parts.csv"),
             NONLASER_TOKENS_CSV=str(self.config_dir / "nonlaser_tokens.csv"),
-            EXPECTED_LASER_DESC_CSV=str(self.config_dir / "expected_laser_descriptions.csv"),
-            LASER_MATERIALS_CSV=str(self.config_dir / "laser_materials.csv"),
         )
 
     def write_bom(self, rows: list[list[str]]) -> Path:
         bom_path = self.temp_dir / "kit-bom.csv"
         with bom_path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
-            writer.writerow(["Part Number", "Description", "Qty", "Material"])
+            writer.writerow(["Part Number", "Description", "Qty"])
             writer.writerows(rows)
         return bom_path
 
     def test_convert_bom_to_radan_csv_runs_without_ui_when_rules_exist(self) -> None:
-        bom_path = self.write_bom([["ABC-001", "LASER PANEL", "2", "ALUMINUM"]])
+        bom_path = self.write_bom([["ABC-001", "LASER PANEL", "2"]])
         (self.temp_dir / "ABC-001.dxf").write_text("dxf", encoding="utf-8")
         (self.config_dir / "description_rules.csv").write_text(
             "Description,Material,Thickness,Strategy\n"
@@ -73,7 +66,7 @@ class InventorToRadanTests(unittest.TestCase):
         )
 
     def test_convert_bom_to_radan_csv_reports_missing_rules_without_ui(self) -> None:
-        bom_path = self.write_bom([["ABC-002", "NEW LASER PANEL", "1", "ALUMINUM"]])
+        bom_path = self.write_bom([["ABC-002", "NEW LASER PANEL", "1"]])
         (self.temp_dir / "ABC-002.dxf").write_text("dxf", encoding="utf-8")
 
         with self.patch_config_paths():
@@ -86,6 +79,68 @@ class InventorToRadanTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.missing_rules, ["NEW LASER PANEL"])
         self.assertEqual(raised.exception.missing_dxf_items, [])
+
+    def test_expected_missing_dxf_uses_description_rules_column_a(self) -> None:
+        bom_path = self.write_bom([["ABC-003", "KNOWN LASER PANEL", "1"]])
+        (self.config_dir / "description_rules.csv").write_text(
+            "Description,Material,Thickness,Strategy\n"
+            "KNOWN LASER PANEL,Aluminum 5052,0.125,Air\n",
+            encoding="utf-8",
+        )
+
+        with self.patch_config_paths():
+            result = inventor_to_radan.convert_bom_to_radan_csv(
+                str(bom_path),
+                allow_prompts=False,
+                show_summary=False,
+            )
+
+        self.assertEqual(result.expected_missing_dxfs, ("ABC-003.dxf",))
+        self.assertFalse((self.config_dir / "expected_laser_descriptions.csv").exists())
+        self.assertFalse((self.config_dir / "laser_materials.csv").exists())
+
+    def test_interactive_expected_laser_choice_creates_complete_rule(self) -> None:
+        bom_path = self.write_bom([["ABC-004", "NEW MISSING LASER PANEL", "1"]])
+
+        class AcceptExpectedDialog:
+            def __init__(self, items):
+                self.expected_descriptions = [item["desc"] for item in items]
+
+            def exec(self):
+                return inventor_to_radan.QDialog.Accepted
+
+        class AcceptRuleDialog:
+            def __init__(self, descriptions, ftq_descriptions):
+                self.descriptions = descriptions
+
+            def exec(self):
+                for description in self.descriptions:
+                    inventor_to_radan.append_rule(description, "Aluminum 5052", "0.125", "Air")
+                return inventor_to_radan.QDialog.Accepted
+
+        with (
+            self.patch_config_paths(),
+            patch.object(inventor_to_radan, "MissingDxfDialog", AcceptExpectedDialog),
+            patch.object(inventor_to_radan, "RadanRuleDialog", AcceptRuleDialog),
+        ):
+            result = inventor_to_radan.convert_bom_to_radan_csv(
+                str(bom_path),
+                allow_prompts=True,
+                show_summary=False,
+            )
+
+        self.assertEqual(result.expected_missing_dxfs, ("ABC-004.dxf",))
+        with (self.config_dir / "description_rules.csv").open(newline="", encoding="utf-8") as handle:
+            rules = list(csv.DictReader(handle))
+        self.assertEqual(
+            rules,
+            [{
+                "Description": "NEW MISSING LASER PANEL",
+                "Material": "Aluminum 5052",
+                "Thickness": "0.125",
+                "Strategy": "Air",
+            }],
+        )
 
     def test_inline_runner_loads_sibling_modules_with_foreign_dialogs_loaded(self) -> None:
         saved_path = list(sys.path)

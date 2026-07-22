@@ -29,7 +29,6 @@ class ReportReviewDialog(QDialog):
         super().__init__(parent)
         self.result = result
         self._acknowledged = False
-        self.rejected_without_ack = False
         self.setWindowTitle("Review Inventor-to-RADAN Report")
         self.setWindowModality(Qt.ApplicationModal)
         self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
@@ -177,7 +176,6 @@ class ReportReviewDialog(QDialog):
             )
             if choice != QMessageBox.Yes:
                 return
-            self.rejected_without_ack = True
             super().reject()
             return
         super().reject()
@@ -195,7 +193,6 @@ class ReportReviewDialog(QDialog):
             QMessageBox.No,
         )
         if choice == QMessageBox.Yes:
-            self.rejected_without_ack = True
             event.accept()
             return
         event.ignore()
