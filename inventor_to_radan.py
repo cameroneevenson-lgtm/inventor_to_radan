@@ -7,22 +7,47 @@ if TOOL_DIR not in sys.path:
     sys.path.insert(0, TOOL_DIR)
 
 # ============================================================
-# Optional dependencies
+# Required dependencies
 # ============================================================
+
+
+class MissingDependencyError(ImportError):
+    """A package this tool needs is not installed.
+
+    Raised rather than exiting because this module is a library as well as a
+    CLI - odd_job_intake imports it to convert a BOM. sys.exit raises
+    SystemExit, which is not an Exception, so it slipped straight through
+    every caller's error handling and took their process down with it at
+    import time, before any of their own code could report anything.
+    """
+
+
+def _missing(package: str, install: str, cause: ImportError):
+    """What to do about a missing package, which depends on who is asking.
+
+    Run directly (someone dragged a BOM onto the script), the useful answer is
+    the one-line install command and a non-zero exit. Imported as a library,
+    the useful answer is an exception the caller can catch and report in its
+    own UI.
+    """
+    message = f"{package} is not installed.\nRun: python -m pip install {install}"
+    if __name__ == "__main__":
+        print(f"ERROR: {message}")
+        raise SystemExit(1)
+    raise MissingDependencyError(message) from cause
+
 
 try:
     import pandas as pd
-except ImportError:
-    print("ERROR: pandas is not installed.\nRun: python -m pip install pandas")
-    sys.exit(1)
+except ImportError as exc:
+    _missing("pandas", "pandas", exc)
 
 try:
     from PySide6.QtWidgets import (
         QApplication, QDialog, QMessageBox
     )
-except ImportError:
-    print("ERROR: PySide6 is not installed.\nRun: python -m pip install pyside6")
-    sys.exit(1)
+except ImportError as exc:
+    _missing("PySide6", "pyside6", exc)
 
 from bom_reader import (
     choose_qty_col,

@@ -238,5 +238,40 @@ class InventorToRadanTests(unittest.TestCase):
                 sys.modules.pop(module_name, None)
 
 
+class MissingDependencyTests(unittest.TestCase):
+    """This module is a library as well as a drag-and-drop CLI.
+
+    A missing package used to be reported with print + sys.exit(1) at import
+    time. SystemExit does not inherit from Exception, so it went straight
+    through odd_job_intake's `except Exception` around the conversion and took
+    that process down before it could say anything about which BOM failed.
+    """
+
+    def test_a_missing_package_raises_for_a_library_caller(self) -> None:
+        with self.assertRaises(inventor_to_radan.MissingDependencyError) as caught:
+            inventor_to_radan._missing("pandas", "pandas", ImportError("boom"))
+        message = str(caught.exception)
+        self.assertIn("pandas is not installed", message)
+        # Still tells them how to fix it.
+        self.assertIn("pip install pandas", message)
+
+    def test_it_is_catchable_as_an_ordinary_exception(self) -> None:
+        """The property that was missing. `except Exception` must see it."""
+        try:
+            inventor_to_radan._missing("PySide6", "pyside6", ImportError("boom"))
+        except Exception as exc:
+            self.assertIsInstance(exc, ImportError)
+        else:
+            self.fail("nothing was raised")
+
+    def test_run_directly_it_still_exits_with_the_install_line(self) -> None:
+        """Someone dragging a BOM onto the script wants the one-line fix and a
+        non-zero exit, not a traceback."""
+        with patch.object(inventor_to_radan, "__name__", "__main__"):
+            with self.assertRaises(SystemExit) as caught:
+                inventor_to_radan._missing("pandas", "pandas", ImportError("boom"))
+        self.assertEqual(caught.exception.code, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
