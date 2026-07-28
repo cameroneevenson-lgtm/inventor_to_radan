@@ -1,5 +1,7 @@
 # Inventor to Radan
 
+> Disaster recovery: see [docs/RECOVERY.md](docs/RECOVERY.md) before processing production BOM exports.
+
 Convert an Inventor BOM (`.csv` or `.xlsx`) into a Radan import CSV, with DXF accountability checks and a text report.
 
 ## What this tool does
