@@ -14,7 +14,7 @@ def module_path_for_entry(entry_path: Path | str) -> Path:
     entry = Path(str(entry_path))
     if entry.suffix.casefold() == ".py":
         return entry
-    return entry.parent / "inventor_to_radan.py"
+    return entry.parent / "bom_converter.py"
 
 
 def _is_inline_import_name(module_name: str) -> bool:

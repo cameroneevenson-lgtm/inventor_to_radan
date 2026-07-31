@@ -12,7 +12,7 @@ PROJECT_DIR = Path(__file__).resolve().parents[1]
 if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
 
-import inventor_to_radan
+import bom_converter
 import inline_runner
 
 class InventorToRadanTests(unittest.TestCase):
@@ -27,7 +27,7 @@ class InventorToRadanTests(unittest.TestCase):
 
     def patch_config_paths(self):
         return patch.multiple(
-            inventor_to_radan,
+            bom_converter,
             RULES_CSV=str(self.config_dir / "description_rules.csv"),
             FTQ_CSV=str(self.config_dir / "ftq_parts.csv"),
             NONLASER_TOKENS_CSV=str(self.config_dir / "nonlaser_tokens.csv"),
@@ -51,7 +51,7 @@ class InventorToRadanTests(unittest.TestCase):
         )
 
         with self.patch_config_paths():
-            result = inventor_to_radan.convert_bom_to_radan_csv(
+            result = bom_converter.convert_bom_to_radan_csv(
                 str(bom_path),
                 allow_prompts=False,
                 show_summary=False,
@@ -70,8 +70,8 @@ class InventorToRadanTests(unittest.TestCase):
         (self.temp_dir / "ABC-002.dxf").write_text("dxf", encoding="utf-8")
 
         with self.patch_config_paths():
-            with self.assertRaises(inventor_to_radan.InventorToRadanNeedsUi) as raised:
-                inventor_to_radan.convert_bom_to_radan_csv(
+            with self.assertRaises(bom_converter.InventorToRadanNeedsUi) as raised:
+                bom_converter.convert_bom_to_radan_csv(
                     str(bom_path),
                     allow_prompts=False,
                     show_summary=False,
@@ -89,7 +89,7 @@ class InventorToRadanTests(unittest.TestCase):
         )
 
         with self.patch_config_paths():
-            result = inventor_to_radan.convert_bom_to_radan_csv(
+            result = bom_converter.convert_bom_to_radan_csv(
                 str(bom_path),
                 allow_prompts=False,
                 show_summary=False,
@@ -107,7 +107,7 @@ class InventorToRadanTests(unittest.TestCase):
                 self.expected_descriptions = [item["desc"] for item in items]
 
             def exec(self):
-                return inventor_to_radan.QDialog.Accepted
+                return bom_converter.QDialog.Accepted
 
         class AcceptRuleDialog:
             def __init__(self, descriptions, ftq_descriptions):
@@ -115,15 +115,15 @@ class InventorToRadanTests(unittest.TestCase):
 
             def exec(self):
                 for description in self.descriptions:
-                    inventor_to_radan.append_rule(description, "Aluminum 5052", "0.125", "Air")
-                return inventor_to_radan.QDialog.Accepted
+                    bom_converter.append_rule(description, "Aluminum 5052", "0.125", "Air")
+                return bom_converter.QDialog.Accepted
 
         with (
             self.patch_config_paths(),
-            patch.object(inventor_to_radan, "MissingDxfDialog", AcceptExpectedDialog),
-            patch.object(inventor_to_radan, "RadanRuleDialog", AcceptRuleDialog),
+            patch.object(bom_converter, "MissingDxfDialog", AcceptExpectedDialog),
+            patch.object(bom_converter, "RadanRuleDialog", AcceptRuleDialog),
         ):
-            result = inventor_to_radan.convert_bom_to_radan_csv(
+            result = bom_converter.convert_bom_to_radan_csv(
                 str(bom_path),
                 allow_prompts=True,
                 show_summary=False,
@@ -169,7 +169,7 @@ class InventorToRadanTests(unittest.TestCase):
             (tool_dir / "bom_reader.py").write_text("ADDED_COUNT = 7\n", encoding="utf-8")
             (tool_dialogs / "__init__.py").write_text("", encoding="utf-8")
             (tool_dialogs / "missing_dxf_dialog.py").write_text("VALUE = 'inventor'\n", encoding="utf-8")
-            entry = tool_dir / "inventor_to_radan.py"
+            entry = tool_dir / "bom_converter.py"
             entry.write_text(
                 "import bom_reader\n"
                 "from dialogs.missing_dxf_dialog import VALUE\n"
@@ -217,7 +217,7 @@ class InventorToRadanTests(unittest.TestCase):
                 sys.modules.pop(name, None)
             sys.modules.pop(module_name, None)
 
-            spec = importlib.util.spec_from_file_location(module_name, PROJECT_DIR / "inventor_to_radan.py")
+            spec = importlib.util.spec_from_file_location(module_name, PROJECT_DIR / "bom_converter.py")
             self.assertIsNotNone(spec)
             assert spec is not None
             self.assertIsNotNone(spec.loader)
@@ -248,8 +248,8 @@ class MissingDependencyTests(unittest.TestCase):
     """
 
     def test_a_missing_package_raises_for_a_library_caller(self) -> None:
-        with self.assertRaises(inventor_to_radan.MissingDependencyError) as caught:
-            inventor_to_radan._missing("pandas", "pandas", ImportError("boom"))
+        with self.assertRaises(bom_converter.MissingDependencyError) as caught:
+            bom_converter._missing("pandas", "pandas", ImportError("boom"))
         message = str(caught.exception)
         self.assertIn("pandas is not installed", message)
         # Still tells them how to fix it.
@@ -258,7 +258,7 @@ class MissingDependencyTests(unittest.TestCase):
     def test_it_is_catchable_as_an_ordinary_exception(self) -> None:
         """The property that was missing. `except Exception` must see it."""
         try:
-            inventor_to_radan._missing("PySide6", "pyside6", ImportError("boom"))
+            bom_converter._missing("PySide6", "pyside6", ImportError("boom"))
         except Exception as exc:
             self.assertIsInstance(exc, ImportError)
         else:
@@ -267,9 +267,9 @@ class MissingDependencyTests(unittest.TestCase):
     def test_run_directly_it_still_exits_with_the_install_line(self) -> None:
         """Someone dragging a BOM onto the script wants the one-line fix and a
         non-zero exit, not a traceback."""
-        with patch.object(inventor_to_radan, "__name__", "__main__"):
+        with patch.object(bom_converter, "__name__", "__main__"):
             with self.assertRaises(SystemExit) as caught:
-                inventor_to_radan._missing("pandas", "pandas", ImportError("boom"))
+                bom_converter._missing("pandas", "pandas", ImportError("boom"))
         self.assertEqual(caught.exception.code, 1)
 
 

@@ -15,7 +15,7 @@ if not exist "%PY%" (
   exit /b 1
 )
 
-set "SCRIPT=%ROOT%inventor_to_radan.py"
+set "SCRIPT=%ROOT%bom_converter.py"
 
 if not "%~1"=="" (
   cd /d "%~dp1"
