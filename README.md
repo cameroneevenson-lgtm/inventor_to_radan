@@ -21,7 +21,7 @@ Convert an Inventor BOM (`.csv` or `.xlsx`) into a Radan import CSV, with DXF ac
 
 ## Project files
 
-- `inventor_to_radan.py` - main application logic (PySide6)
+- `bom_converter.py` - main application logic (PySide6)
 - `config.py` - paths and constants
 - `bom_reader.py` - BOM column detection and value coercion
 - `rule_store.py` - description-rule CSV load/save
@@ -35,7 +35,7 @@ Convert an Inventor BOM (`.csv` or `.xlsx`) into a Radan import CSV, with DXF ac
 
 ## Programmatic use
 
-`inline_runner.run_inline()` and `convert_bom_to_radan_csv()` (`inventor_to_radan.py`) provide a headless conversion path with no dialogs, used by the sibling app `truck_nest_explorer` (`services.py` `run_inventor_to_radan_inline`, called with `allow_prompts=False, show_summary=False`). Passing `allow_prompts=False` skips the missing-DXF/missing-rule prompts and the Report Review gate; callers get `InventorToRadanNeedsUi`, `InventorToRadanCancelled`, or `InventorToRadanReportRejected` raised instead.
+`inline_runner.run_inline()` and `convert_bom_to_radan_csv()` (`bom_converter.py`) provide a headless conversion path with no dialogs, used by the sibling app `truck_nest_explorer` (`services.py` `run_inventor_to_radan_inline`, called with `allow_prompts=False, show_summary=False`). Passing `allow_prompts=False` skips the missing-DXF/missing-rule prompts and the Report Review gate; callers get `InventorToRadanNeedsUi`, `InventorToRadanCancelled`, or `InventorToRadanReportRejected` raised instead.
 
 ## Requirements
 
@@ -63,13 +63,13 @@ python -m pip install pandas openpyxl pyside6
 ### Option 2: Direct Python
 
 ```powershell
-python inventor_to_radan.py "W:\path\to\BOM.csv"
+python bom_converter.py "W:\path\to\BOM.csv"
 ```
 
 You can also pass an Excel BOM:
 
 ```powershell
-python inventor_to_radan.py "W:\path\to\BOM.xlsx"
+python bom_converter.py "W:\path\to\BOM.xlsx"
 ```
 
 ## Output

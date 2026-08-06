@@ -17,7 +17,7 @@ Batch launcher (drag a BOM file onto it, or run with a path):
 Direct Python:
 
 ```powershell
-C:\Tools\.venv\Scripts\python.exe inventor_to_radan.py "W:\path\to\BOM.xlsx"
+C:\Tools\.venv\Scripts\python.exe bom_converter.py "W:\path\to\BOM.xlsx"
 ```
 
 Tests:
@@ -31,7 +31,7 @@ C:\Tools\.venv\Scripts\python.exe -m pytest tests/test_inventor_to_radan.py -k t
 
 ## Architecture
 
-**This app is consumed programmatically by `truck_nest_explorer`, and that headless path is a real contract, not just a CLI convenience.** `inline_runner.run_inline()` / `convert_bom_to_radan_csv()` in `inventor_to_radan.py` provide a no-dialogs conversion path used by the sibling app's `services.py` (`run_inventor_to_radan_inline`, called with `allow_prompts=False, show_summary=False`). With `allow_prompts=False`, missing-DXF/missing-rule prompts and the Report Review gate are skipped entirely — instead the caller must handle `InventorToRadanNeedsUi`, `InventorToRadanCancelled`, or `InventorToRadanReportRejected` being raised. Changing this function's signature or exception contract is a cross-repo breaking change.
+**This app is consumed programmatically by `truck_nest_explorer`, and that headless path is a real contract, not just a CLI convenience.** `inline_runner.run_inline()` / `convert_bom_to_radan_csv()` in `bom_converter.py` provide a no-dialogs conversion path used by the sibling app's `services.py` (`run_inventor_to_radan_inline`, called with `allow_prompts=False, show_summary=False`). With `allow_prompts=False`, missing-DXF/missing-rule prompts and the Report Review gate are skipped entirely — instead the caller must handle `InventorToRadanNeedsUi`, `InventorToRadanCancelled`, or `InventorToRadanReportRejected` being raised. Changing this function's signature or exception contract is a cross-repo breaking change.
 
 **Report Review is a mandatory gate in interactive mode**: after generating `*_Radan.csv` and `*_report.txt`, `dialogs/report_review_dialog.py` blocks until the operator accepts or discards; choosing Discard deletes both just-written output files. A run is not "complete" just because the CSV was written to disk.
 
