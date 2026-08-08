@@ -40,3 +40,7 @@ C:\Tools\.venv\Scripts\python.exe -m pytest tests/test_inventor_to_radan.py -k t
 **Production Inventor BOMs do not contain a Material column.** Material and strategy come from the Description-keyed `description_rules.csv`. Do not reintroduce the old `laser_materials.csv` learning path; it remained header-only because it had no production input.
 
 **Local CSV config files (`description_rules.csv`, `ftq_parts.csv`, `nonlaser_tokens.csv`) are created automatically if missing** — don't add defensive existence checks around them elsewhere; `rule_store.py` owns that.
+
+## Branching
+
+All work happens on `main`. Do not create branches for agent work - commit and push straight to `main`. If an agent branch does turn up, fold it into `main`, prune it locally and on the remote, then push.
