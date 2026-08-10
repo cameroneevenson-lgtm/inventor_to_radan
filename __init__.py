@@ -13,4 +13,16 @@ otherwise - so adding this marker broke the test suite instead of helping.
 Intra-repo imports stay flat (`import bom_reader`), which keeps
 `bom_converter.py` runnable as the script the .bat invokes and exec-able by
 inline_runner, which is how odd_job_intake and truck_nest_explorer use it.
+
+When installed via pip (`pip install git+https://...`), this directory lands
+in site-packages as `inventor_to_radan/`, off of sys.path by default - so the
+same flat imports need this directory on sys.path too, not just the script-run
+and inline_runner cases above.
 """
+
+import os
+import sys
+
+_PKG_DIR = os.path.dirname(os.path.abspath(__file__))
+if _PKG_DIR not in sys.path:
+    sys.path.insert(0, _PKG_DIR)

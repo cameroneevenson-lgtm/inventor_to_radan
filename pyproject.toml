@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inventor_to_radan"
+version = "1.0.0"
+description = "Convert an Inventor BOM export into a Radan import CSV"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas",
+    "openpyxl",
+    "pyside6",
+]
+
+[tool.setuptools]
+packages = ["inventor_to_radan", "inventor_to_radan.dialogs"]
+package-dir = { "inventor_to_radan" = "." }
+
+[tool.setuptools.package-data]
+inventor_to_radan = ["description_rules.csv", "ftq_parts.csv", "nonlaser_tokens.csv"]
