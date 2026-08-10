@@ -10,8 +10,10 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QTextEdit,
     QVBoxLayout,
+    QWidget,
 )
 
 from dialogs.missing_dxf_dialog import make_label
@@ -73,6 +75,28 @@ class ReportReviewDialog(QDialog):
             report_text = f"Could not read report file:\n{exc}"
         self.viewer.setHtml(self._report_html(report_text))
 
+        # One checkbox per warning line, not one for the whole report. A
+        # single "I reviewed this" box let a five-line report and a
+        # fifty-line one take the same one click - F59270 Pump House was one
+        # of the lines that click skipped past. Ticking each line by hand is
+        # deliberately slower than reading a summary count.
+        self.line_checkboxes: list[QCheckBox] = []
+        checklist_layout = QVBoxLayout()
+        checklist_colors = {"red": "#B91C1C", "yellow": "#A16207"}
+        for level, line in self._warning_lines(report_text):
+            checkbox = QCheckBox(line)
+            checkbox.setStyleSheet(f"color: {checklist_colors[level]}; font-weight: 700;")
+            checkbox.stateChanged.connect(self._update_ack_button)
+            checklist_layout.addWidget(checkbox)
+            self.line_checkboxes.append(checkbox)
+
+        checklist_widget = QWidget()
+        checklist_widget.setLayout(checklist_layout)
+        checklist_scroll = QScrollArea()
+        checklist_scroll.setWidget(checklist_widget)
+        checklist_scroll.setWidgetResizable(True)
+        checklist_scroll.setMaximumHeight(200)
+
         self.chk_ack = QCheckBox("I have reviewed this report and understand any warnings before production.")
         self.chk_ack.stateChanged.connect(self._update_ack_button)
 
@@ -94,6 +118,9 @@ class ReportReviewDialog(QDialog):
         lay.addWidget(detail)
         lay.addWidget(path_label)
         lay.addWidget(self.viewer, 1)
+        if self.line_checkboxes:
+            lay.addWidget(make_label("Check off every item below - each one, not just the box underneath:", bold=True))
+            lay.addWidget(checklist_scroll)
         lay.addWidget(self.chk_ack)
         lay.addLayout(btn_row)
         self.setLayout(lay)
@@ -144,8 +171,31 @@ class ReportReviewDialog(QDialog):
             f"{body}</body></html>"
         )
 
+    @classmethod
+    def _warning_lines(cls, report_text: str) -> list[tuple[str, str]]:
+        """(level, line) for every red/yellow item in the report - the
+        individual things that need their own checkbox, not the section
+        header above them or a "(none)" that has nothing to acknowledge."""
+        active_level = ""
+        lines: list[tuple[str, str]] = []
+        for line in report_text.splitlines():
+            stripped = line.strip()
+            if stripped.endswith(":"):
+                active_level = ""
+                for section, level in cls.REVIEW_SECTION_LEVELS.items():
+                    if stripped.startswith(section):
+                        active_level = level
+                        break
+                continue
+            if not stripped or stripped == "(none)":
+                continue
+            if active_level in ("red", "yellow"):
+                lines.append((active_level, stripped))
+        return lines
+
     def _update_ack_button(self):
-        self.btn_ack.setEnabled(self.chk_ack.isChecked())
+        all_lines_checked = all(cb.isChecked() for cb in self.line_checkboxes)
+        self.btn_ack.setEnabled(self.chk_ack.isChecked() and all_lines_checked)
 
     def open_report(self):
         try:
@@ -154,11 +204,13 @@ class ReportReviewDialog(QDialog):
             QMessageBox.warning(self, "Open Report", str(exc))
 
     def accept(self):
-        if not self.chk_ack.isChecked():
+        unchecked = sum(1 for cb in self.line_checkboxes if not cb.isChecked())
+        if unchecked or not self.chk_ack.isChecked():
+            detail = f"{unchecked} item(s) above are still unchecked. " if unchecked else ""
             QMessageBox.warning(
                 self,
                 "Review Required",
-                "Review the report and check the acknowledgement before continuing.",
+                f"{detail}Check off every item and the acknowledgement box before continuing.",
             )
             return
         self._acknowledged = True
