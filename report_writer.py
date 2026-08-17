@@ -19,7 +19,7 @@ def write_report(report_path: str,
         f.write(f"Added to RADAN (rows): {added_count}\n")
         f.write("\n")
 
-        f.write("Expected laser but missing DXF (likely deleted / missing):\n")
+        f.write("Expected laser but missing DXF:\n")
         if expected_missing_dxfs:
             for name in expected_missing_dxfs:
                 f.write(f"  {name}\n")

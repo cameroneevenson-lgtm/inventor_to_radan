@@ -30,7 +30,7 @@ class ReportReviewDialogTests(unittest.TestCase):
 
     def test_warning_lines_skips_headers_and_none(self) -> None:
         report_text = (
-            "Expected laser but missing DXF (likely deleted / missing):\n"
+            "Expected laser but missing DXF:\n"
             "  8500-F55985-11.dxf\n"
             "\n"
             "Orphan DXFs (in folder but not referenced by BOM):\n"
@@ -57,7 +57,7 @@ class ReportReviewDialogTests(unittest.TestCase):
         enables, and each one is independent - checking one must not enable
         the others."""
         report_text = (
-            "Expected laser but missing DXF (likely deleted / missing):\n"
+            "Expected laser but missing DXF:\n"
             "  8500-F55985-11.dxf\n"
             "\n"
             "Orphan DXFs (in folder but not referenced by BOM):\n"
@@ -92,7 +92,7 @@ class ReportReviewDialogTests(unittest.TestCase):
 
     def test_no_warnings_means_no_line_checkboxes(self) -> None:
         report_text = (
-            "Expected laser but missing DXF (likely deleted / missing):\n"
+            "Expected laser but missing DXF:\n"
             "  (none)\n"
             "\n"
             "Orphan DXFs (in folder but not referenced by BOM):\n"
