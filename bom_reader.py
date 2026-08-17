@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import os
+import re
 
 import pandas as pd
+
+_LENGTH_SUFFIX = re.compile(r"-\d+(?:\.\d+)?$")
 
 
 def normalize_text(val) -> str:
@@ -14,6 +17,14 @@ def normalize_text(val) -> str:
 def first_token(desc: str) -> str:
     d = normalize_text(desc)
     return d.split()[0] if d else ""
+
+
+def part_family(part: str) -> str:
+    """Part number with a trailing cut length stripped: "TIE DOWN-28.75" and
+    "TIE DOWN-6" are both the "TIE DOWN" family. A part number with no length
+    suffix is its own family."""
+    p = normalize_text(part)
+    return _LENGTH_SUFFIX.sub("", p).strip()
 
 
 def find_col(df: pd.DataFrame, keys: list[str]) -> str:

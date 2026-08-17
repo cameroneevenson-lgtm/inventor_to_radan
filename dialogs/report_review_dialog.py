@@ -20,11 +20,17 @@ from dialogs.missing_dxf_dialog import make_label
 
 
 class ReportReviewDialog(QDialog):
+    # Non-laser parts are green, not yellow: every line there matched a token
+    # the operator already put in nonlaser_tokens.csv, so it confirms the
+    # classification rather than asking for a decision. One BOM produced 18 of
+    # them, and 18 checkboxes with nothing behind them is the click-through
+    # fatigue that made the old single blanket checkbox worthless.
     REVIEW_SECTION_LEVELS = {
         "Expected laser but missing DXF": "red",
         "Orphan DXFs": "yellow",
         "DXFs missing PDFs": "yellow",
-        "Non-laser parts": "yellow",
+        "Non-laser parts": "green",
+        "Cut to length from stock": "green",
     }
 
     def __init__(self, result, parent=None):
@@ -40,7 +46,6 @@ class ReportReviewDialog(QDialog):
             len(result.expected_missing_dxfs)
             + len(result.orphan_dxfs)
             + len(result.missing_pdfs)
-            + len(result.nonlaser_parts)
         )
         critical_count = len(result.expected_missing_dxfs)
         if critical_count:

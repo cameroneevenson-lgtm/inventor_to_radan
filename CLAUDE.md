@@ -45,6 +45,20 @@ descriptions; `nonlaser_tokens.csv` classifies known non-laser families. Choosin
 Expected Laser for an unknown missing DXF must collect a complete rule immediately —
 **never append a description-only row.**
 
+**The two "no DXF is fine" lists key off different columns and are not
+interchangeable.** `nonlaser_tokens.csv` matches the first token of the
+*Description* - purchased families that were never laser work. `stock_cut_parts.csv`
+matches the *Part Number* family (part number minus a trailing `-<length>`, so one
+`TIE DOWN` row covers `TIE DOWN-28.75` and every future length) - parts cut to length
+off stock strip. Stock-cut parts carry an ordinary sheet description shared with real
+laser parts, so a description token cannot express them: adding one would mute every
+part on that material.
+
+**Report Review checkboxes are only for red/yellow sections.** Green sections
+(non-laser, stock-cut) confirm a classification the operator already wrote and must
+not generate a per-line checkbox - burying two real warnings under eighteen
+confirmations is how the gate stops being read.
+
 **Production Inventor BOMs do not contain a Material column.** Material and strategy
 come from the Description-keyed `description_rules.csv`. **Do not reintroduce the old
 `laser_materials.csv` learning path**; it remained header-only because it had no

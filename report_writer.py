@@ -10,7 +10,8 @@ def write_report(report_path: str,
                  expected_missing_dxfs: list[str],
                  orphan_dxfs: set[str],
                  missing_pdfs: set[str],
-                 nonlaser_parts: list[str]) -> None:
+                 nonlaser_parts: list[str],
+                 stock_cut_parts: list[str]) -> None:
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(f"BOM: {bom_path}\n")
         f.write(f"Folder: {os.path.dirname(bom_path)}\n")
@@ -46,6 +47,14 @@ def write_report(report_path: str,
         f.write("Non-laser parts (no DXF; token-classified):\n")
         if nonlaser_parts:
             for p in nonlaser_parts:
+                f.write(f"  {p}\n")
+        else:
+            f.write("  (none)\n")
+        f.write("\n")
+
+        f.write("Cut to length from stock (no DXF expected):\n")
+        if stock_cut_parts:
+            for p in stock_cut_parts:
                 f.write(f"  {p}\n")
         else:
             f.write("  (none)\n")

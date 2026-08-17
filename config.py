@@ -8,6 +8,7 @@ RULES_CSV = os.path.join(TOOLS_DIR, "description_rules.csv")
 FTQ_CSV = os.path.join(TOOLS_DIR, "ftq_parts.csv")
 
 NONLASER_TOKENS_CSV = os.path.join(TOOLS_DIR, "nonlaser_tokens.csv")
+STOCK_CUT_PARTS_CSV = os.path.join(TOOLS_DIR, "stock_cut_parts.csv")
 
 RADAN_OUTPUT_SUFFIX = "_Radan.csv"
 REPORT_SUFFIX = "_report.txt"

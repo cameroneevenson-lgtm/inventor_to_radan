@@ -18,4 +18,9 @@ packages = ["inventor_to_radan", "inventor_to_radan.dialogs"]
 package-dir = { "inventor_to_radan" = "." }
 
 [tool.setuptools.package-data]
-inventor_to_radan = ["description_rules.csv", "ftq_parts.csv", "nonlaser_tokens.csv"]
+inventor_to_radan = [
+    "description_rules.csv",
+    "ftq_parts.csv",
+    "nonlaser_tokens.csv",
+    "stock_cut_parts.csv",
+]

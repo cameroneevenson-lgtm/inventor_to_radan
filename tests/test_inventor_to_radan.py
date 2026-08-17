@@ -31,6 +31,7 @@ class InventorToRadanTests(unittest.TestCase):
             RULES_CSV=str(self.config_dir / "description_rules.csv"),
             FTQ_CSV=str(self.config_dir / "ftq_parts.csv"),
             NONLASER_TOKENS_CSV=str(self.config_dir / "nonlaser_tokens.csv"),
+            STOCK_CUT_PARTS_CSV=str(self.config_dir / "stock_cut_parts.csv"),
         )
 
     def write_bom(self, rows: list[list[str]]) -> Path:
@@ -98,6 +99,40 @@ class InventorToRadanTests(unittest.TestCase):
         self.assertEqual(result.expected_missing_dxfs, ("ABC-003.dxf",))
         self.assertFalse((self.config_dir / "expected_laser_descriptions.csv").exists())
         self.assertFalse((self.config_dir / "laser_materials.csv").exists())
+
+    def test_stock_cut_families_are_not_expected_missing_dxfs(self) -> None:
+        """Tie-downs are cut to length off a stock strip, so no per-length DXF
+        is ever drawn - but they carry an ordinary sheet description, which is
+        what put all eight of them in the red missing-DXF section. One
+        family row has to cover every length, including ones nobody has cut
+        yet."""
+        bom_path = self.write_bom([
+            ["TIE DOWN-18", "PLATE, AL ALY, .25\" THK, 5052 H32", "2"],
+            ["TIE DOWN-28.75", "PLATE, AL ALY, .25\" THK, 5052 H32", "1"],
+            ["ABC-005", "PLATE, AL ALY, .25\" THK, 5052 H32", "1"],
+        ])
+        (self.config_dir / "description_rules.csv").write_text(
+            "Description,Material,Thickness,Strategy\n"
+            "\"PLATE, AL ALY, .25\"\" THK, 5052 H32\",Aluminum 5052,0.25,Air\n",
+            encoding="utf-8",
+        )
+        (self.config_dir / "stock_cut_parts.csv").write_text(
+            "PartFamily\nTIE DOWN\n",
+            encoding="utf-8",
+        )
+
+        with self.patch_config_paths():
+            result = bom_converter.convert_bom_to_radan_csv(
+                str(bom_path),
+                allow_prompts=False,
+                show_summary=False,
+            )
+
+        # The real laser part beside them still gets flagged.
+        self.assertEqual(result.expected_missing_dxfs, ("ABC-005.dxf",))
+        self.assertEqual(result.stock_cut_parts, ("TIE DOWN-18", "TIE DOWN-28.75"))
+        report = Path(result.report_path).read_text(encoding="utf-8")
+        self.assertIn("Cut to length from stock (no DXF expected):\n  TIE DOWN-18\n", report)
 
     def test_interactive_expected_laser_choice_creates_complete_rule(self) -> None:
         bom_path = self.write_bom([["ABC-004", "NEW MISSING LASER PANEL", "1"]])

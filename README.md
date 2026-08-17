@@ -18,6 +18,7 @@ Convert an Inventor BOM (`.csv` or `.xlsx`) into a Radan import CSV, with DXF ac
   - Audit report (`*_report.txt`)
 - After generating, opens a mandatory Report Review dialog. Choosing "Discard" deletes the just-written `*_Radan.csv` and `*_report.txt`; the run is not considered complete until the operator accepts or discards.
 - Parts listed in `ftq_parts.csv` have their output `MATERIAL` forced to `Aluminum 3003 CHK FTQ` regardless of the matched description rule.
+- Part families listed in `stock_cut_parts.csv` (e.g. `TIE DOWN`) are cut to length from stock, so a missing DXF is expected rather than a warning. One family row covers every length: `TIE DOWN-6`, `TIE DOWN-28.75`, and any length nobody has cut yet.
 
 ## Project files
 
@@ -31,7 +32,8 @@ Convert an Inventor BOM (`.csv` or `.xlsx`) into a Radan import CSV, with DXF ac
 - `inventor_to_radan.bat` - launcher script
 - `description_rules.csv` - per-description Radan rule table
 - `ftq_parts.csv` - FTQ part numbers whose material is forced to `Aluminum 3003 CHK FTQ`
-- `nonlaser_tokens.csv` - non-laser family tokens
+- `nonlaser_tokens.csv` - non-laser family tokens (matched against the Description)
+- `stock_cut_parts.csv` - part-number families cut to length from stock (matched against the Part Number)
 
 ## Programmatic use
 

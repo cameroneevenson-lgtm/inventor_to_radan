@@ -54,6 +54,7 @@ from bom_reader import (
     find_col,
     first_token,
     normalize_text,
+    part_family,
     read_bom as _read_bom,
     to_int,
 )
@@ -64,6 +65,7 @@ from config import (
     RADAN_OUTPUT_SUFFIX,
     REPORT_SUFFIX,
     RULES_CSV,
+    STOCK_CUT_PARTS_CSV,
     SUPPORTED_BOM_EXTENSIONS,
     TOOLS_DIR,
 )
@@ -90,6 +92,7 @@ class InventorToRadanResult:
     orphan_dxfs: tuple[str, ...]
     missing_pdfs: tuple[str, ...]
     nonlaser_parts: tuple[str, ...]
+    stock_cut_parts: tuple[str, ...]
 
 
 class InventorToRadanNeedsUi(RuntimeError):
@@ -177,11 +180,13 @@ class RadanRuleDialog(_RadanRuleDialog):
 def compute_expected_missing_dxfs(df: pd.DataFrame) -> list[str]:
     """
     For rows with no DXF, expected missing = full Description in column A of
-    description_rules.csv AND NOT first token in nonlaser_tokens.csv.
+    description_rules.csv AND NOT first token in nonlaser_tokens.csv AND NOT a
+    family in stock_cut_parts.csv.
     Returns sorted unique list of "PartNumber.dxf" names.
     """
     expected_desc = set(load_rules())
     nonlaser_tokens = {t.lower() for t in load_set(NONLASER_TOKENS_CSV, "Token")}
+    stock_cut_families = _stock_cut_families()
 
     missing: list[str] = []
     nodxf = df[~df["_HasDxf"]]
@@ -193,10 +198,34 @@ def compute_expected_missing_dxfs(df: pd.DataFrame) -> list[str]:
         if tok and tok in nonlaser_tokens:
             continue
 
+        if part_family(part).lower() in stock_cut_families:
+            continue
+
         if desc in expected_desc and part:
             missing.append(f"{part}.dxf")
 
     return sorted(set(missing))
+
+def _stock_cut_families() -> set[str]:
+    return {f.lower() for f in load_set(STOCK_CUT_PARTS_CSV, "PartFamily") if f}
+
+def compute_stock_cut_parts(df: pd.DataFrame) -> list[str]:
+    """
+    Parts with no DXF whose family is listed in stock_cut_parts.csv - cut to
+    length from stock rather than nested, so a per-length DXF is never drawn.
+    Keyed on the PART NUMBER family, not the description token: these carry an
+    ordinary sheet description shared with real laser parts, so a description
+    token would mute far more than the family.
+    Returns sorted unique list of PartNumbers.
+    """
+    stock_cut_families = _stock_cut_families()
+    out: list[str] = []
+    nodxf = df[~df["_HasDxf"]]
+    for _, r in nodxf.iterrows():
+        part = r["_Part"]
+        if part and part_family(part).lower() in stock_cut_families:
+            out.append(part)
+    return sorted(set(out))
 
 def compute_nonlaser_parts(df: pd.DataFrame) -> list[str]:
     """
@@ -218,6 +247,7 @@ def ensure_config_csvs() -> None:
     ensure_csv(RULES_CSV, ["Description", "Material", "Thickness", "Strategy"])
     ensure_csv(FTQ_CSV, ["PartNumber"])
     ensure_csv(NONLASER_TOKENS_CSV, ["Token"])
+    ensure_csv(STOCK_CUT_PARTS_CSV, ["PartFamily"])
 
 
 def prepare_bom_dataframe(bom_path: str) -> tuple[pd.DataFrame, str]:
@@ -368,6 +398,7 @@ def write_radan_outputs(
 
     expected_missing_dxfs = compute_expected_missing_dxfs(df)
     nonlaser_parts = compute_nonlaser_parts(df)
+    stock_cut_parts = compute_stock_cut_parts(df)
 
     report_path = os.path.join(
         base_dir,
@@ -382,6 +413,7 @@ def write_radan_outputs(
         orphan_dxfs=orphan_dxfs,
         missing_pdfs=missing_pdfs,
         nonlaser_parts=nonlaser_parts,
+        stock_cut_parts=stock_cut_parts,
     )
 
     return InventorToRadanResult(
@@ -393,6 +425,7 @@ def write_radan_outputs(
         orphan_dxfs=tuple(sorted(orphan_dxfs)),
         missing_pdfs=tuple(sorted(missing_pdfs)),
         nonlaser_parts=tuple(nonlaser_parts),
+        stock_cut_parts=tuple(stock_cut_parts),
     )
 
 

@@ -50,6 +50,44 @@ class ReportReviewDialogTests(unittest.TestCase):
             ],
         )
 
+    def test_nonlaser_parts_are_not_checkboxes(self) -> None:
+        """Token-classified non-laser parts confirm a rule the operator already
+        wrote; they are not decisions. A BOM with 18 of them must not put 18
+        checkboxes in front of the real warnings."""
+        report_text = (
+            "Expected laser but missing DXF:\n"
+            "  (none)\n"
+            "\n"
+            "Orphan DXFs (in folder but not referenced by BOM):\n"
+            "  8500-f55900-11.dxf\n"
+            "\n"
+            "Non-laser parts (no DXF; token-classified):\n"
+            "  STEEL-1.5x1.5x0.125\n"
+            "  UNISTRUT-P1000\n"
+        )
+        report_path = Path(self.id().replace(".", "_") + "_report.txt").resolve()
+        report_path.write_text(report_text, encoding="utf-8")
+        self.addCleanup(report_path.unlink, missing_ok=True)
+
+        self.assertEqual(
+            ReportReviewDialog._warning_lines(report_text),
+            [("yellow", "8500-f55900-11.dxf")],
+        )
+
+        result = _FakeResult(
+            report_path=str(report_path),
+            orphan_dxfs=("8500-f55900-11.dxf",),
+            nonlaser_parts=("STEEL-1.5x1.5x0.125", "UNISTRUT-P1000"),
+        )
+        dialog = ReportReviewDialog(result)
+        self.addCleanup(dialog.deleteLater)
+
+        self.assertEqual([cb.text() for cb in dialog.line_checkboxes], ["8500-f55900-11.dxf"])
+
+        dialog.chk_ack.setChecked(True)
+        dialog.line_checkboxes[0].setChecked(True)
+        self.assertTrue(dialog.btn_ack.isEnabled())
+
     def test_ack_button_requires_every_line_checked(self) -> None:
         """Regression for F59270 Pump House: a single blanket checkbox let a
         report with real warnings get acknowledged without reading them.
