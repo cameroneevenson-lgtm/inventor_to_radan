@@ -59,6 +59,12 @@ part on that material.
 not generate a per-line checkbox - burying two real warnings under eighteen
 confirmations is how the gate stops being read.
 
+**`truck_nest_explorer/dialogs/inventor_report_review_dialog.py` is a second copy of
+`dialogs/report_review_dialog.py`, and it is the one operators actually see** -
+conversions reach them through that app, not this repo's launcher. Changing the
+report's sections here, or the review gate, means changing both; a fix applied only
+here looks like it did nothing.
+
 **Production Inventor BOMs do not contain a Material column.** Material and strategy
 come from the Description-keyed `description_rules.csv`. **Do not reintroduce the old
 `laser_materials.csv` learning path**; it remained header-only because it had no
