@@ -40,3 +40,4 @@ Description,Material,Thickness,Strategy
 "PLATE, MS, .75"" THK, 44W",Mild Steel-A36,0.75,O2
 "PLATE, MS, 0.250 in THK, 44W",Mild Steel-A36,0.25,O2
 "SHEET, SS, .036"" THK, 304",Stainless Steel,0.036,N2
+"PLATE, SS, .5"" THK, 304",Stainless Steel,0.5,N2
