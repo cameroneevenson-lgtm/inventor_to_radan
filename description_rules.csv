@@ -20,6 +20,8 @@ Description,Material,Thickness,Strategy
 "SHEET, AL ALY, 0.0625"" THK, 5052 H32",Aluminum 5052,0.06,Air
 "SHEET, SS, .063"" THK, 304",Stainless Steel,0.06,N2
 "SHEET, SS, .08"" THK, 304",Stainless Steel,0.08,N2
+"SHEET, MS, .063"" THK, 44W",Mild Steel-A36,0.06,O2
+"SHEET, MS, .08"" THK, 44W",Mild Steel-A36,0.08,O2
 "PLATE, AL ALY, .188"" THK, 5052 H32 NEW TOOL",Aluminum 5052,0.18,AIR
 "PLATE, AL ALY, 0.250 in THK, 5052",Aluminum 5052,0.25,Air
 "SHEET, AL ALY, 0.188 in THK, 5052",Aluminum 5052,0.18,AIR
