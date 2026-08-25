@@ -90,6 +90,13 @@ production input.
 `nonlaser_tokens.csv`) are created automatically if missing** — don't add defensive
 existence checks around them elsewhere; `rule_store.py` owns that.
 
+**The rule CSVs do not always live in the repo.** `config.DATA_DIR` is the checkout when
+one is present (`.git` alongside), so the shop's tables stay version controlled; a pip
+install instead reads and writes `%LOCALAPPDATA%\inventor_to_radan`, seeded once from the
+packaged copies, because site-packages is replaced on upgrade.
+`INVENTOR_TO_RADAN_DATA_DIR` overrides both. Seeding keys off `DATA_DIR`, not the
+`RULES_CSV`-style constants - a caller that repoints those wants its own file left alone.
+
 ## Branching
 
 All work happens on `main`. Do not create branches for agent work - commit and push straight to `main`. If an agent branch does turn up, fold it into `main`, prune it locally and on the remote, then push.

@@ -13,6 +13,9 @@ dependencies = [
     "pyside6",
 ]
 
+[project.scripts]
+inventor-to-radan = "inventor_to_radan.cli:main"
+
 [tool.setuptools]
 packages = ["inventor_to_radan", "inventor_to_radan.dialogs"]
 package-dir = { "inventor_to_radan" = "." }

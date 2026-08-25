@@ -2,12 +2,28 @@ from __future__ import annotations
 
 import csv
 import os
+import shutil
 
 from bom_reader import normalize_text
 
 
 def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
+
+
+def seed_csv(src: str, dst: str) -> None:
+    """Populate a missing config CSV from the copy shipped with the package.
+
+    Only bites on a pip install, where the rule tables cannot live in
+    site-packages: without this the operator would open the tool to four
+    header-only files instead of the shop's catalog. A checkout seeds itself
+    (src is dst) and is skipped.
+    """
+    if os.path.abspath(src) == os.path.abspath(dst):
+        return
+    if os.path.exists(dst) or not os.path.exists(src):
+        return
+    shutil.copyfile(src, dst)
 
 
 def ensure_csv(path: str, header: list[str]) -> None:

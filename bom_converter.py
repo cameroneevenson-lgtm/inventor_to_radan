@@ -59,6 +59,8 @@ from bom_reader import (
     to_int,
 )
 from config import (
+    CONFIG_CSV_NAMES,
+    DATA_DIR,
     FTQ_CSV,
     NONLASER_TOKENS_CSV,
     RADAN_COL_ORDER,
@@ -66,8 +68,8 @@ from config import (
     REPORT_SUFFIX,
     RULES_CSV,
     STOCK_CUT_PARTS_CSV,
+    SEED_DIR,
     SUPPORTED_BOM_EXTENSIONS,
-    TOOLS_DIR,
 )
 from dialogs.missing_dxf_dialog import MissingDxfDialog as _MissingDxfDialog
 from dialogs.radan_rule_dialog import RadanRuleDialog as _RadanRuleDialog
@@ -129,6 +131,9 @@ def ensure_dir(path: str) -> None:
 
 def ensure_csv(path: str, header: list[str]) -> None:
     rule_store.ensure_csv(path, header)
+
+def seed_csv(src: str, dst: str) -> None:
+    rule_store.seed_csv(src, dst)
 
 def load_set(path: str, col: str) -> set[str]:
     return rule_store.load_set(path, col)
@@ -243,7 +248,12 @@ def compute_nonlaser_parts(df: pd.DataFrame) -> list[str]:
     return sorted(set(out))
 
 def ensure_config_csvs() -> None:
-    ensure_dir(TOOLS_DIR)
+    ensure_dir(DATA_DIR)
+    # Seeding is a property of DATA_DIR, not of the path constants above: a
+    # caller that points RULES_CSV somewhere of its own wants that file left
+    # alone, not backfilled with the shop catalog.
+    for name in CONFIG_CSV_NAMES:
+        seed_csv(os.path.join(SEED_DIR, name), os.path.join(DATA_DIR, name))
     ensure_csv(RULES_CSV, ["Description", "Material", "Thickness", "Strategy"])
     ensure_csv(FTQ_CSV, ["PartNumber"])
     ensure_csv(NONLASER_TOKENS_CSV, ["Token"])
@@ -514,19 +524,29 @@ def main(bom_path: str) -> int:
 # Entry point
 # ============================================================
 
-if __name__ == "__main__":
+def run_cli(argv: list[str] | None = None) -> int:
+    """Argument handling and the QApplication bootstrap.
+
+    Shared by the script run (the .bat drag-and-drop) and the installed
+    `inventor-to-radan` command via `cli.py`, so the two cannot drift apart.
+    """
+    args = list(sys.argv[1:] if argv is None else argv)
+
     # Optional dev pause (set env var PAUSE_ON_START=1)
     if os.environ.get("PAUSE_ON_START") == "1":
         input("Script started. Press Enter to continue...")
 
-    if len(sys.argv) < 2:
+    if not args:
         print("Drag a BOM (.csv or .xlsx) onto this script.")
-        sys.exit(1)
+        return 1
 
-    app = QApplication(sys.argv)
+    app = QApplication(sys.argv)  # noqa: F841 - must outlive the dialogs below
     try:
-        rc = main(sys.argv[1])
+        return main(args[0])
     except Exception as e:
         QMessageBox.critical(None, "Error", f"{type(e).__name__}: {e}")
-        rc = 1
-    sys.exit(rc)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(run_cli())

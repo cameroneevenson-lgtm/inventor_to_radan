@@ -14,6 +14,7 @@ if str(PROJECT_DIR) not in sys.path:
 
 import bom_converter
 import inline_runner
+import rule_store
 
 class InventorToRadanTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -306,6 +307,62 @@ class MissingDependencyTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as caught:
                 bom_converter._missing("pandas", "pandas", ImportError("boom"))
         self.assertEqual(caught.exception.code, 1)
+
+
+class SeedingConfigCsvsTests(unittest.TestCase):
+    """A pip install cannot keep its rule tables in site-packages - the next
+    upgrade replaces that directory - so it reads and writes a per-user
+    DATA_DIR seeded from the packaged defaults. Without seeding the operator
+    would open the tool to four header-only files instead of the catalog.
+    """
+
+    def setUp(self) -> None:
+        self._temp_context = tempfile.TemporaryDirectory(prefix="inventor_to_radan_seed_")
+        self.temp_dir = Path(self._temp_context.name)
+        self.seed_dir = self.temp_dir / "packaged"
+        self.data_dir = self.temp_dir / "userdata"
+        self.seed_dir.mkdir()
+        (self.seed_dir / "description_rules.csv").write_text(
+            "Description,Material,Thickness,Strategy\nLASER PANEL,Aluminum 3003,0.125,Default\n",
+            encoding="utf-8",
+        )
+
+    def tearDown(self) -> None:
+        self._temp_context.cleanup()
+
+    def seeded_data_dir(self):
+        return patch.multiple(
+            bom_converter,
+            DATA_DIR=str(self.data_dir),
+            SEED_DIR=str(self.seed_dir),
+        )
+
+    def test_a_fresh_data_dir_gets_the_packaged_rules(self) -> None:
+        with self.seeded_data_dir():
+            bom_converter.ensure_config_csvs()
+        seeded = (self.data_dir / "description_rules.csv").read_text(encoding="utf-8")
+        self.assertIn("LASER PANEL", seeded)
+
+    def test_seeding_never_overwrites_rules_already_there(self) -> None:
+        """The operator's own learned rules outrank the shipped defaults."""
+        self.data_dir.mkdir()
+        (self.data_dir / "description_rules.csv").write_text(
+            "Description,Material,Thickness,Strategy\nTHEIR OWN PANEL,Stainless Steel,0.25,AIR\n",
+            encoding="utf-8",
+        )
+        with self.seeded_data_dir():
+            bom_converter.ensure_config_csvs()
+        kept = (self.data_dir / "description_rules.csv").read_text(encoding="utf-8")
+        self.assertIn("THEIR OWN PANEL", kept)
+        self.assertNotIn("LASER PANEL", kept)
+
+    def test_a_checkout_seeds_from_itself_and_is_left_alone(self) -> None:
+        """DATA_DIR is SEED_DIR in a clone, where the tables are shared by
+        committing them. Copying a file onto itself would truncate it."""
+        rules = self.seed_dir / "description_rules.csv"
+        before = rules.read_text(encoding="utf-8")
+        rule_store.seed_csv(str(rules), str(rules))
+        self.assertEqual(rules.read_text(encoding="utf-8"), before)
 
 
 if __name__ == "__main__":

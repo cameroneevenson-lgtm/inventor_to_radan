@@ -28,6 +28,7 @@ Convert an Inventor BOM (`.csv` or `.xlsx`) into a Radan import CSV, with DXF ac
 - `rule_store.py` - description-rule CSV load/save
 - `report_writer.py` - audit report generation
 - `inline_runner.py` - headless/programmatic entry point (see "Programmatic use" below)
+- `cli.py` - the `inventor-to-radan` console script installed by pip; defers to `bom_converter.run_cli`
 - `dialogs/` - `missing_dxf_dialog.py`, `radan_rule_dialog.py`, `report_review_dialog.py`
 - `inventor_to_radan.bat` - launcher script
 - `description_rules.csv` - per-description Radan rule table
@@ -39,30 +40,77 @@ Convert an Inventor BOM (`.csv` or `.xlsx`) into a Radan import CSV, with DXF ac
 
 `inline_runner.run_inline()` and `convert_bom_to_radan_csv()` (`bom_converter.py`) provide a headless conversion path with no dialogs, used by the sibling app `truck_nest_explorer` (`services.py` `run_inventor_to_radan_inline`, called with `allow_prompts=False, show_summary=False`). Passing `allow_prompts=False` skips the missing-DXF/missing-rule prompts and the Report Review gate; callers get `InventorToRadanNeedsUi`, `InventorToRadanCancelled`, or `InventorToRadanReportRejected` raised instead.
 
+## Install
+
+### Option A: pip (a machine that just needs to run the tool)
+
+```powershell
+pip install "git+https://github.com/cameroneevenson-lgtm/inventor_to_radan.git"
+```
+
+The quotes and the lack of a space after `git+` both matter: `git+https` is the URL
+scheme, so `pip install git+ https://...` splits into two nonsense requirements and
+`pip install git https://...` downloads the GitHub HTML page and reports `cannot detect
+archive format`. Requires Git for Windows on `PATH`. Without git, install the zip
+instead:
+
+```powershell
+pip install "https://github.com/cameroneevenson-lgtm/inventor_to_radan/archive/refs/heads/main.zip"
+```
+
+Either one puts an `inventor-to-radan` command on `PATH`:
+
+```powershell
+inventor-to-radan "W:\path\to\BOM.csv"
+```
+
+**A pip install gets its own copy of the rule tables.** `description_rules.csv`,
+`ftq_parts.csv`, `nonlaser_tokens.csv` and `stock_cut_parts.csv` cannot live in
+site-packages - the next upgrade replaces that directory - so they are seeded into
+`%LOCALAPPDATA%\inventor_to_radan` on first run and edited there from then on. Rules
+learned on that machine stay on that machine, and rules added to the repo afterwards do
+not reach it until it is reinstalled. To keep several machines on one shared table,
+point them all at the same directory:
+
+```powershell
+setx INVENTOR_TO_RADAN_DATA_DIR "L:\Fabrication\inventor_to_radan"
+```
+
+### Option B: clone (the shop's own machines)
+
+A checkout is its own data dir, so the rule tables stay version controlled and are
+shared by pulling and committing them - which is how the catalog grows.
+
+```powershell
+git clone https://github.com/cameroneevenson-lgtm/inventor_to_radan.git
+cd inventor_to_radan
+python -m pip install pandas openpyxl pyside6
+```
+
 ## Requirements
 
 - Windows
 - Python 3.10+ (recommended)
-- Packages:
+- Packages (installed for you by Option A):
   - `pandas`
   - `openpyxl` for `.xlsx` BOM files
   - `pyside6`
 
-Install dependencies:
-
-```powershell
-python -m pip install pandas openpyxl pyside6
-```
-
 ## Run
 
-### Option 1: Batch launcher (recommended)
+### Option 1: Batch launcher (a clone; recommended for the shop)
 
 1. Ensure `inventor_to_radan.bat` points to a valid Python at:
    - `C:\Tools\.venv\Scripts\python.exe`
 2. Drag a BOM file (`.csv` or `.xlsx`) onto `inventor_to_radan.bat`.
 
-### Option 2: Direct Python
+### Option 2: The installed command (a pip install)
+
+```powershell
+inventor-to-radan "W:\path\to\BOM.csv"
+```
+
+### Option 3: Direct Python
 
 ```powershell
 python bom_converter.py "W:\path\to\BOM.csv"
