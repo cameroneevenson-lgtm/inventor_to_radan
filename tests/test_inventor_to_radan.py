@@ -365,5 +365,70 @@ class SeedingConfigCsvsTests(unittest.TestCase):
         self.assertEqual(rules.read_text(encoding="utf-8"), before)
 
 
+class VerificationOnlyTests(unittest.TestCase):
+    """The frozen exe handed to designers checks a BOM and reports on it. The
+    RADAN import CSV is the laser programmer's artifact, so a verification run
+    must not leave one behind in the job folder.
+    """
+
+    def setUp(self) -> None:
+        self._temp_context = tempfile.TemporaryDirectory(prefix="inventor_to_radan_verify_")
+        self.temp_dir = Path(self._temp_context.name)
+        self.config_dir = self.temp_dir / "config"
+        self.config_dir.mkdir()
+        (self.config_dir / "description_rules.csv").write_text(
+            "Description,Material,Thickness,Strategy\nLASER PANEL,Aluminum 3003,0.125,Default\n",
+            encoding="utf-8",
+        )
+        bom = self.temp_dir / "kit-bom.csv"
+        with bom.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["Part Number", "Description", "Qty"])
+            writer.writerow(["ABC-001", "LASER PANEL", "2"])
+        (self.temp_dir / "ABC-001.dxf").write_text("dxf", encoding="utf-8")
+        self.bom_path = bom
+
+    def tearDown(self) -> None:
+        self._temp_context.cleanup()
+
+    def patch_config_paths(self):
+        return patch.multiple(
+            bom_converter,
+            RULES_CSV=str(self.config_dir / "description_rules.csv"),
+            FTQ_CSV=str(self.config_dir / "ftq_parts.csv"),
+            NONLASER_TOKENS_CSV=str(self.config_dir / "nonlaser_tokens.csv"),
+            STOCK_CUT_PARTS_CSV=str(self.config_dir / "stock_cut_parts.csv"),
+        )
+
+    def convert(self, **kwargs):
+        with self.patch_config_paths():
+            return bom_converter.convert_bom_to_radan_csv(
+                str(self.bom_path), allow_prompts=False, show_summary=False, **kwargs
+            )
+
+    def test_verification_writes_the_report_but_no_csv(self) -> None:
+        result = self.convert(write_csv=False)
+        self.assertTrue(Path(result.report_path).exists())
+        self.assertFalse((self.temp_dir / "kit-bom_Radan.csv").exists())
+
+    def test_verification_still_counts_the_rows_that_would_export(self) -> None:
+        """The report is only useful if the checks still ran."""
+        result = self.convert(write_csv=False)
+        self.assertEqual(result.added_count, 1)
+        self.assertIsNone(result.out_path)
+
+    def test_the_report_does_not_name_a_csv_that_was_never_written(self) -> None:
+        result = self.convert(write_csv=False)
+        report = Path(result.report_path).read_text(encoding="utf-8")
+        self.assertIn("not written (verification only)", report)
+        self.assertNotIn("kit-bom_Radan.csv", report)
+
+    def test_the_default_still_writes_the_csv(self) -> None:
+        """Verification is opt-in; the laser programmer's path is unchanged."""
+        result = self.convert()
+        self.assertTrue((self.temp_dir / "kit-bom_Radan.csv").exists())
+        self.assertEqual(result.out_path, str(self.temp_dir / "kit-bom_Radan.csv"))
+
+
 if __name__ == "__main__":
     unittest.main()

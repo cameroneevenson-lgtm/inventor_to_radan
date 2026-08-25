@@ -30,6 +30,9 @@ Convert an Inventor BOM (`.csv` or `.xlsx`) into a Radan import CSV, with DXF ac
 - `inline_runner.py` - headless/programmatic entry point (see "Programmatic use" below)
 - `cli.py` - the `inventor-to-radan` console script installed by pip; defers to `bom_converter.run_cli`
 - `__main__.py` - `python -m inventor_to_radan`, for when the scripts directory is not on `PATH`
+- `verify_main.py` - frozen entry point for the verification-only exe (report, no RADAN CSV)
+- `build_verify_exe.bat` - PyInstaller build for that exe; freezes the four rule CSVs into the bundle
+- `dialogs/bom_picker_dialog.py` - the exe's **Select BOM...** front door
 - `dialogs/` - `missing_dxf_dialog.py`, `radan_rule_dialog.py`, `report_review_dialog.py`
 - `inventor_to_radan.bat` - launcher script
 - `description_rules.csv` - per-description Radan rule table
@@ -100,6 +103,30 @@ git clone https://github.com/cameroneevenson-lgtm/inventor_to_radan.git
 cd inventor_to_radan
 python -m pip install pandas openpyxl pyside6
 ```
+
+### Option C: frozen exe (a machine with no Python at all)
+
+`build_verify_exe.bat` produces `dist\BOM Verify\`, a ~170 MB folder with no Python
+dependency. It is the **verification-only** build: it checks a BOM for missing DXFs and
+unknown descriptions and writes `*_report.txt` next to it, but does not produce the
+RADAN import CSV - that stays the laser programmer's artifact.
+
+Launched from a shortcut it opens a picker with a **Select BOM...** button and stays open
+afterwards, because fix-and-recheck is the normal loop. A BOM dropped on the exe is
+checked once.
+
+All four rule CSVs are frozen into the bundle from the checkout that built it, so the exe
+carries the shop's tables as of build time and gets no later additions. Rebuild and
+redistribute after adding rules, or point machines at a live shared copy:
+
+```powershell
+setx INVENTOR_TO_RADAN_DATA_DIR "L:\Fabrication\inventor_to_radan"
+```
+
+On first run the frozen tables are copied to `%LOCALAPPDATA%\inventor_to_radan` and used
+from there. **Seeding only fills files that are missing**, so if a machine ever ran a
+build whose tables did not come across, delete that folder before rerunning - an empty
+catalog left in place stays empty.
 
 ## Requirements
 

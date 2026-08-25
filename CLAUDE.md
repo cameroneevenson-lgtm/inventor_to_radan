@@ -97,6 +97,15 @@ packaged copies, because site-packages is replaced on upgrade.
 `INVENTOR_TO_RADAN_DATA_DIR` overrides both. Seeding keys off `DATA_DIR`, not the
 `RULES_CSV`-style constants - a caller that repoints those wants its own file left alone.
 
+**The verification-only build writes no RADAN CSV.** `verify_main.py` (frozen by
+`build_verify_exe.bat`) calls the same conversion with `write_csv=False`, which skips
+`out_df.to_csv` and sets `result.out_path` to `None`; the report then says "not written
+(verification only)" rather than naming a file that does not exist. `write_csv` is
+keyword-only with a `True` default, so TNE's contract is untouched. The four rule CSVs
+are frozen into the bundle and `config._resolve_seed_dir` finds them under
+`sys._MEIPASS`; a build that omits `--add-data` seeds an empty catalog silently, and the
+operator then re-teaches rules the shop already has.
+
 ## Branching
 
 All work happens on `main`. Do not create branches for agent work - commit and push straight to `main`. If an agent branch does turn up, fold it into `main`, prune it locally and on the remote, then push.

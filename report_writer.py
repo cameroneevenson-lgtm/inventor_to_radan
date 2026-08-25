@@ -5,7 +5,7 @@ import os
 
 def write_report(report_path: str,
                  bom_path: str,
-                 out_path: str,
+                 out_path: str | None,
                  added_count: int,
                  expected_missing_dxfs: list[str],
                  orphan_dxfs: set[str],
@@ -15,9 +15,15 @@ def write_report(report_path: str,
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(f"BOM: {bom_path}\n")
         f.write(f"Folder: {os.path.dirname(bom_path)}\n")
-        f.write(f"RADAN output: {out_path}\n")
-        f.write("\n")
-        f.write(f"Added to RADAN (rows): {added_count}\n")
+        if out_path is None:
+            # Verification-only run: no CSV exists, so do not name one.
+            f.write("RADAN output: not written (verification only)\n")
+            f.write("\n")
+            f.write(f"Rows that would export: {added_count}\n")
+        else:
+            f.write(f"RADAN output: {out_path}\n")
+            f.write("\n")
+            f.write(f"Added to RADAN (rows): {added_count}\n")
         f.write("\n")
 
         f.write("Expected laser but missing DXF:\n")

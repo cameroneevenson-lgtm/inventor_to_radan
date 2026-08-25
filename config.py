@@ -1,11 +1,28 @@
 from __future__ import annotations
 
 import os
+import sys
 
 PKG_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Defaults shipped inside the package/checkout, used to seed a fresh DATA_DIR.
-SEED_DIR = PKG_DIR
+def _resolve_seed_dir() -> str:
+    """Where the packaged default CSVs are read from to fill a fresh DATA_DIR.
+
+    A PyInstaller build unpacks its data files under `sys._MEIPASS`, and
+    whether they land at the root or in a package-named subdirectory depends
+    on the `--add-data` destination the build used, which in turn depends on
+    whether the package or `bom_converter.py` was frozen. Both are accepted
+    because guessing wrong is silent and expensive: seeding finds nothing, the
+    operator opens the tool to an empty catalog, and starts re-teaching rules
+    the shop already has.
+    """
+    bundle = getattr(sys, "_MEIPASS", "")
+    if bundle:
+        nested = os.path.join(bundle, "inventor_to_radan")
+        if os.path.exists(os.path.join(nested, "description_rules.csv")):
+            return nested
+        return bundle
+    return PKG_DIR
 
 
 def _resolve_data_dir() -> str:
@@ -29,6 +46,9 @@ def _resolve_data_dir() -> str:
 
 
 DATA_DIR = _resolve_data_dir()
+
+# Defaults shipped inside the package/checkout/bundle, used to fill a fresh DATA_DIR.
+SEED_DIR = _resolve_seed_dir()
 
 RULES_CSV = os.path.join(DATA_DIR, "description_rules.csv")
 FTQ_CSV = os.path.join(DATA_DIR, "ftq_parts.csv")

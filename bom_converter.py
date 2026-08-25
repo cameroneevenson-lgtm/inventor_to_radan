@@ -87,7 +87,7 @@ import rule_store
 @dataclass(frozen=True)
 class InventorToRadanResult:
     bom_path: str
-    out_path: str
+    out_path: str | None  # None on a verification-only run
     report_path: str
     added_count: int
     expected_missing_dxfs: tuple[str, ...]
@@ -338,6 +338,7 @@ def write_radan_outputs(
     df: pd.DataFrame,
     rules: dict[str, dict],
     ftq_parts: set[str],
+    write_csv: bool = True,
 ) -> InventorToRadanResult:
     rows: list[dict] = []
     bom_dxfs: set[str] = set()
@@ -390,7 +391,13 @@ def write_radan_outputs(
         # Still write a header-only CSV in the correct order
         out_df = pd.DataFrame(columns=RADAN_COL_ORDER)
 
-    out_df.to_csv(out_path, index=False, header=False, columns=RADAN_COL_ORDER)
+    if write_csv:
+        out_df.to_csv(out_path, index=False, header=False, columns=RADAN_COL_ORDER)
+    else:
+        # Verification only: the accountability checks and the report still run,
+        # but the RADAN import CSV is the laser programmer's artifact and is not
+        # this run's to produce.
+        out_path = None
 
     # ============================================================
     # Folder integrity + report
@@ -455,6 +462,7 @@ def convert_bom_to_radan_csv(
     *,
     allow_prompts: bool = False,
     show_summary: bool = False,
+    write_csv: bool = True,
 ) -> InventorToRadanResult:
     ensure_config_csvs()
     df, base_dir = prepare_bom_dataframe(bom_path)
@@ -498,6 +506,7 @@ def convert_bom_to_radan_csv(
         df=df,
         rules=rules,
         ftq_parts=ftq_parts,
+        write_csv=write_csv,
     )
     if show_summary:
         dialog = ReportReviewDialog(result)
@@ -513,9 +522,11 @@ def convert_bom_to_radan_csv(
     return result
 
 
-def main(bom_path: str) -> int:
+def main(bom_path: str, *, write_csv: bool = True) -> int:
     try:
-        convert_bom_to_radan_csv(bom_path, allow_prompts=True, show_summary=True)
+        convert_bom_to_radan_csv(
+            bom_path, allow_prompts=True, show_summary=True, write_csv=write_csv
+        )
     except (InventorToRadanCancelled, InventorToRadanReportRejected):
         return 2
     return 0
@@ -524,13 +535,21 @@ def main(bom_path: str) -> int:
 # Entry point
 # ============================================================
 
-def run_cli(argv: list[str] | None = None) -> int:
+def run_cli(argv: list[str] | None = None, *, write_csv: bool = True) -> int:
     """Argument handling and the QApplication bootstrap.
 
     Shared by the script run (the .bat drag-and-drop) and the installed
     `inventor-to-radan` command via `cli.py`, so the two cannot drift apart.
     """
     args = list(sys.argv[1:] if argv is None else argv)
+
+    # --verify checks the BOM and writes only the report. The RADAN import CSV
+    # is the laser programmer's artifact; a designer checking their own BOM for
+    # missing DXFs and unknown descriptions has no use for it and should not be
+    # leaving one behind in the job folder.
+    if "--verify" in args:
+        args = [a for a in args if a != "--verify"]
+        write_csv = False
 
     # Optional dev pause (set env var PAUSE_ON_START=1)
     if os.environ.get("PAUSE_ON_START") == "1":
@@ -542,7 +561,7 @@ def run_cli(argv: list[str] | None = None) -> int:
 
     app = QApplication(sys.argv)  # noqa: F841 - must outlive the dialogs below
     try:
-        return main(args[0])
+        return main(args[0], write_csv=write_csv)
     except Exception as e:
         QMessageBox.critical(None, "Error", f"{type(e).__name__}: {e}")
         return 1
