@@ -31,7 +31,10 @@ Convert an Inventor BOM (`.csv` or `.xlsx`) into a Radan import CSV, with DXF ac
 - `cli.py` - the `inventor-to-radan` console script installed by pip; defers to `bom_converter.run_cli`
 - `__main__.py` - `python -m inventor_to_radan`, for when the scripts directory is not on `PATH`
 - `verify_main.py` - frozen entry point for the verification-only exe (report, no RADAN CSV)
-- `build_verify_exe.bat` - PyInstaller build for that exe; freezes the four rule CSVs into the bundle
+- `build_verify_exe.bat` - PyInstaller build for that exe; creates `.buildvenv` so the bundle carries
+  only this app's dependencies
+- `BOM Verify.spec` - the build's binary/data filtering and onefile config; committed because
+  `--exclude-module` cannot drop individual Qt DLLs
 - `dialogs/bom_picker_dialog.py` - the exe's **Select BOM...** front door
 - `dialogs/` - `missing_dxf_dialog.py`, `radan_rule_dialog.py`, `report_review_dialog.py`
 - `inventor_to_radan.bat` - launcher script
@@ -106,29 +109,40 @@ python -m pip install pandas openpyxl pyside6
 
 ### Option C: frozen exe (a machine with no Python at all)
 
-`build_verify_exe.bat` produces `dist\BOM Verify\`, a ~235 MB folder with no Python
-dependency. It is the **verification-only** build: it checks a BOM for missing DXFs and
-unknown descriptions and writes `*_report.txt` next to it, but does not produce the
-RADAN import CSV - that stays the laser programmer's artifact.
+`build_verify_exe.bat` produces `dist\BOM Verify.exe` - a single ~50 MB file, nothing else
+to copy. It is the **verification-only** build: it checks a BOM for missing DXFs and
+unknown descriptions and writes `*_report.txt` next to it, but does not produce the RADAN
+import CSV - that stays the laser programmer's artifact.
 
 Launched from a shortcut it opens a picker with a **Select BOM...** button and stays open
-afterwards, because fix-and-recheck is the normal loop. A BOM dropped on the exe is
-checked once.
+afterwards, because fix-and-recheck is the normal loop. A BOM dropped on the exe is checked
+once. Being a onefile build it unpacks to temp on every launch, so expect 5-15 s before the
+first window appears.
 
 The four rule CSVs sit **beside the exe**, not in a per-user folder, seeded on first run
 from copies frozen into the bundle by the checkout that built it. So a fresh copy starts
-with the shop's catalog as of build time and grows from there, and a folder put on a
-share works as one shared installation: everyone running it reads and writes the same
-tables.
+with the shop's catalog as of build time and grows from there, and an exe put on a share
+works as one shared installation: everyone running it reads and writes the same tables.
 
-If the share is read-only the tool falls back to `%LOCALAPPDATA%\inventor_to_radan`,
+If the location is read-only the tool falls back to `%LOCALAPPDATA%\inventor_to_radan`,
 because it still has to be able to learn a rule. `INVENTOR_TO_RADAN_DATA_DIR` overrides
 both.
 
-**Copy the whole folder.** `_internal\` holds ~1800 files and the exe will not start
-without all of them; a partial copy is the usual cause of "nothing happens". If it does
-fail to start it writes `BOM Verify - error.log` next to the exe - that file is the first
-thing to read.
+If it fails to start it writes `BOM Verify - error.log` next to the exe - that file is the
+first thing to read.
+
+**The build uses `.buildvenv\`, not `C:\Tools\.venv`.** The shared venv carries every other
+tool's dependencies and PyInstaller bundles what it finds: builds from it were shipping
+80 MB of `pyarrow` (required by `streamlit`, not by pandas) plus scipy, matplotlib, PIL and
+cryptography - 235 MB of folder for a 50 MB app. The build script creates `.buildvenv` on
+first run with only `pandas openpyxl pyside6 pyinstaller`. Do not point it back at the
+shared venv, and do not re-add a `--exclude-module` list to `BOM Verify.spec` to compensate;
+the packages are simply not there.
+
+`BOM Verify.spec` additionally drops Qt pieces this app never loads - the software OpenGL
+fallback, translations, the networking and TLS stack, unused image and platform plugins.
+Dropping `opengl32sw.dll` assumes a real GPU driver; if this ever has to run over Remote
+Desktop or in a VM, put it back.
 
 ## Requirements
 

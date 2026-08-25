@@ -1,36 +1,40 @@
 @echo off
 setlocal
-REM Builds the verification-only exe handed to designers.
+
+REM Builds the verification-only exe handed to designers: a single file, no
+REM Python needed on the target machine.
 REM
-REM The four CSVs are frozen into the bundle from this checkout, so the exe
-REM carries the shop's rule tables as of build time. Rebuild and redistribute
-REM after adding rules here, or point machines at a shared table with
-REM INVENTOR_TO_RADAN_DATA_DIR.
+REM Builds from .buildvenv, NOT C:\Tools\.venv. The shared venv carries every
+REM other tool's dependencies, and PyInstaller bundles whatever it finds: it
+REM was shipping 80 MB of pyarrow because streamlit requires it, plus scipy,
+REM matplotlib, PIL and cryptography. A venv of this project's own is the
+REM difference between a 235 MB build and a 50 MB one, and it does not grow
+REM every time somebody installs something into C:\Tools\.venv.
 
 set "ROOT=%~dp0"
-set "PY=C:\Tools\.venv\Scripts\python.exe"
+set "VENV=%ROOT%.buildvenv"
+set "PY=%VENV%\Scripts\python.exe"
 
 if not exist "%PY%" (
-  echo ERROR: venv Python not found at %PY%
-  pause
-  exit /b 1
+  echo Creating the build venv at %VENV% ...
+  py -3 -m venv "%VENV%" || python -m venv "%VENV%"
+  if errorlevel 1 (
+    echo ERROR: could not create the build venv.
+    pause
+    exit /b 1
+  )
+  "%PY%" -m pip install --upgrade pip
+  "%PY%" -m pip install pandas openpyxl pyside6 pyinstaller
+  if errorlevel 1 (
+    echo ERROR: could not install build dependencies.
+    pause
+    exit /b 1
+  )
 )
 
-REM C:\Tools\.venv is shared by every tool in C:\Tools, so PyInstaller's analysis
-REM otherwise sweeps in scipy, matplotlib, PIL and cryptography - about 100 MB this
-REM app never imports. Excluding them is safe; check the exe still runs if you add
-REM to this list.
-"%PY%" -m PyInstaller --noconfirm --clean --onedir --name "BOM Verify" ^
-  --exclude-module scipy --exclude-module matplotlib --exclude-module PIL ^
-  --exclude-module cryptography --exclude-module tkinter --exclude-module IPython ^
-  --exclude-module pytest ^
-  --distpath "%ROOT%dist" --workpath "%ROOT%build" --specpath "%ROOT%build" ^
-  --paths "%ROOT%." ^
-  --add-data "%ROOT%description_rules.csv;." ^
-  --add-data "%ROOT%ftq_parts.csv;." ^
-  --add-data "%ROOT%nonlaser_tokens.csv;." ^
-  --add-data "%ROOT%stock_cut_parts.csv;." ^
-  "%ROOT%verify_main.py"
+"%PY%" -m PyInstaller --noconfirm --clean ^
+  --distpath "%ROOT%dist" --workpath "%ROOT%build" ^
+  "%ROOT%BOM Verify.spec"
 
 echo.
 echo Build finished with code %ERRORLEVEL%.

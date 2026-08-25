@@ -107,6 +107,9 @@ one shared installation rather than a seed for private per-PC catalogs; it falls
 the per-user dir only when the location is read-only. `_resolve_seed_dir` finds the
 frozen defaults under `sys._MEIPASS`, and a build that omits `--add-data` seeds an empty
 catalog silently - the operator then re-teaches rules the shop already has.
+The build runs from `.buildvenv`, never `C:\Tools\.venv`: PyInstaller bundles whatever the
+venv holds, and the shared one made a 50 MB app into a 235 MB folder. Its spec is committed
+because `--exclude-module` cannot drop individual Qt DLLs.
 
 ## Branching
 
