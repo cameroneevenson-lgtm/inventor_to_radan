@@ -9,35 +9,69 @@ from __future__ import annotations
 
 import os
 import sys
-
-import bom_converter
-import config
-from dialogs.bom_picker_dialog import pick_bom
-
-from PySide6.QtWidgets import QApplication, QMessageBox
+import traceback
 
 
-def verify_one(bom_path: str) -> str:
-    """Run the checks on one BOM and return what to show above the picker."""
-    name = os.path.basename(bom_path)
+def crash_log_path() -> str:
+    """Beside the exe if that is writable, otherwise the temp directory.
+
+    A double-clicked exe that dies before its first window takes the console
+    with it, so the failure is invisible - "nothing happens" is all the
+    operator can report. This is the only record that survives that.
+    """
+    if getattr(sys, "frozen", False):
+        beside = os.path.dirname(os.path.abspath(sys.executable))
+        try:
+            probe = os.path.join(beside, ".itr_write_probe")
+            with open(probe, "w", encoding="utf-8") as handle:
+                handle.write("")
+            os.remove(probe)
+            return os.path.join(beside, "BOM Verify - error.log")
+        except OSError:
+            pass
+    import tempfile
+
+    return os.path.join(tempfile.gettempdir(), "BOM Verify - error.log")
+
+
+def record_crash(exc: BaseException) -> str:
+    path = crash_log_path()
     try:
-        bom_converter.convert_bom_to_radan_csv(
-            bom_path, allow_prompts=True, show_summary=True, write_csv=False
-        )
-    except bom_converter.InventorToRadanCancelled:
-        return f"{name}: cancelled."
-    except bom_converter.InventorToRadanReportRejected:
-        return f"{name}: report discarded, nothing kept."
-    except Exception as exc:
-        QMessageBox.critical(None, "Error", f"{type(exc).__name__}: {exc}")
-        return f"{name}: {type(exc).__name__}."
-    return f"{name}: checked. Report written next to the BOM."
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("".join(traceback.format_exception(exc)))
+            handle.write(f"\nfrozen: {getattr(sys, 'frozen', False)}\n")
+            handle.write(f"executable: {sys.executable}\n")
+    except OSError:
+        return ""
+    return path
 
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
+
+    from PySide6.QtWidgets import QApplication, QMessageBox
+
+    import bom_converter
+    import config
+    from dialogs.bom_picker_dialog import pick_bom
+
     app = QApplication(sys.argv)  # noqa: F841 - must outlive the dialogs below
     bom_converter.ensure_config_csvs()
+
+    def verify_one(bom_path: str) -> str:
+        name = os.path.basename(bom_path)
+        try:
+            bom_converter.convert_bom_to_radan_csv(
+                bom_path, allow_prompts=True, show_summary=True, write_csv=False
+            )
+        except bom_converter.InventorToRadanCancelled:
+            return f"{name}: cancelled."
+        except bom_converter.InventorToRadanReportRejected:
+            return f"{name}: report discarded, nothing kept."
+        except Exception as exc:
+            QMessageBox.critical(None, "Error", f"{type(exc).__name__}: {exc}")
+            return f"{name}: {type(exc).__name__}."
+        return f"{name}: checked. Report written next to the BOM."
 
     # A BOM dropped on the exe runs once and exits; launched from a shortcut it
     # asks, and keeps asking, because fix-and-recheck is the normal loop.
@@ -53,5 +87,29 @@ def main(argv: list[str] | None = None) -> int:
         message = verify_one(bom_path)
 
 
+def run() -> int:
+    """Startup guard. Everything above this can fail before there is a window
+    to show an error in - a missing Qt plugin on a share, an unwritable data
+    dir - and the operator would see the process vanish with no message."""
+    try:
+        return main()
+    except BaseException as exc:  # noqa: BLE001 - last line before silence
+        log = record_crash(exc)
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+
+            if QApplication.instance() is None:
+                QApplication(sys.argv)
+            QMessageBox.critical(
+                None,
+                "BOM Verify could not start",
+                f"{type(exc).__name__}: {exc}\n\nDetails written to:\n{log or '(could not write a log)'}",
+            )
+        except BaseException:
+            print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
+            print(f"Details: {log}", file=sys.stderr)
+        return 1
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run())

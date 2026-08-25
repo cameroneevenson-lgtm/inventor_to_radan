@@ -101,10 +101,12 @@ packaged copies, because site-packages is replaced on upgrade.
 `build_verify_exe.bat`) calls the same conversion with `write_csv=False`, which skips
 `out_df.to_csv` and sets `result.out_path` to `None`; the report then says "not written
 (verification only)" rather than naming a file that does not exist. `write_csv` is
-keyword-only with a `True` default, so TNE's contract is untouched. The four rule CSVs
-are frozen into the bundle and `config._resolve_seed_dir` finds them under
-`sys._MEIPASS`; a build that omits `--add-data` seeds an empty catalog silently, and the
-operator then re-teaches rules the shop already has.
+keyword-only with a `True` default, so TNE's contract is untouched. A frozen build keeps its
+tables **beside the exe** (`config._resolve_data_dir`), so a folder copied to a share is
+one shared installation rather than a seed for private per-PC catalogs; it falls back to
+the per-user dir only when the location is read-only. `_resolve_seed_dir` finds the
+frozen defaults under `sys._MEIPASS`, and a build that omits `--add-data` seeds an empty
+catalog silently - the operator then re-teaches rules the shop already has.
 
 ## Branching
 

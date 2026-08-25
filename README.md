@@ -106,7 +106,7 @@ python -m pip install pandas openpyxl pyside6
 
 ### Option C: frozen exe (a machine with no Python at all)
 
-`build_verify_exe.bat` produces `dist\BOM Verify\`, a ~170 MB folder with no Python
+`build_verify_exe.bat` produces `dist\BOM Verify\`, a ~235 MB folder with no Python
 dependency. It is the **verification-only** build: it checks a BOM for missing DXFs and
 unknown descriptions and writes `*_report.txt` next to it, but does not produce the
 RADAN import CSV - that stays the laser programmer's artifact.
@@ -115,18 +115,20 @@ Launched from a shortcut it opens a picker with a **Select BOM...** button and s
 afterwards, because fix-and-recheck is the normal loop. A BOM dropped on the exe is
 checked once.
 
-All four rule CSVs are frozen into the bundle from the checkout that built it, so the exe
-carries the shop's tables as of build time and gets no later additions. Rebuild and
-redistribute after adding rules, or point machines at a live shared copy:
+The four rule CSVs sit **beside the exe**, not in a per-user folder, seeded on first run
+from copies frozen into the bundle by the checkout that built it. So a fresh copy starts
+with the shop's catalog as of build time and grows from there, and a folder put on a
+share works as one shared installation: everyone running it reads and writes the same
+tables.
 
-```powershell
-setx INVENTOR_TO_RADAN_DATA_DIR "L:\Fabrication\inventor_to_radan"
-```
+If the share is read-only the tool falls back to `%LOCALAPPDATA%\inventor_to_radan`,
+because it still has to be able to learn a rule. `INVENTOR_TO_RADAN_DATA_DIR` overrides
+both.
 
-On first run the frozen tables are copied to `%LOCALAPPDATA%\inventor_to_radan` and used
-from there. **Seeding only fills files that are missing**, so if a machine ever ran a
-build whose tables did not come across, delete that folder before rerunning - an empty
-catalog left in place stays empty.
+**Copy the whole folder.** `_internal\` holds ~1800 files and the exe will not start
+without all of them; a partial copy is the usual cause of "nothing happens". If it does
+fail to start it writes `BOM Verify - error.log` next to the exe - that file is the first
+thing to read.
 
 ## Requirements
 

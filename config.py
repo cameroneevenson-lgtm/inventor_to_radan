@@ -25,24 +25,60 @@ def _resolve_seed_dir() -> str:
     return PKG_DIR
 
 
+def _user_data_dir() -> str:
+    base = os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    return os.path.join(base, "inventor_to_radan")
+
+
+def _is_writable(path: str) -> bool:
+    """Can we actually create files here? Asked, not assumed.
+
+    A share can be mounted read-only, and the answer decides whether the exe
+    keeps its tables beside itself or falls back to a per-user copy.
+    """
+    probe = os.path.join(path, ".itr_write_probe")
+    try:
+        os.makedirs(path, exist_ok=True)
+        with open(probe, "w", encoding="utf-8") as handle:
+            handle.write("")
+        os.remove(probe)
+        return True
+    except OSError:
+        return False
+
+
 def _resolve_data_dir() -> str:
     """Where the four rule CSVs are read from and written back to.
 
-    A checkout is its own data dir: the shop's rule tables are version
-    controlled and shared by pulling and committing them, so writes have to
-    land in the clone. A pip install has nowhere safe to write - site-packages
-    is replaced on the next upgrade - so it gets a per-user directory seeded
-    from the packaged defaults on first run, and diverges from the shop's
-    tables from then on. Point INVENTOR_TO_RADAN_DATA_DIR at a share to keep a
-    pip-installed machine on the same tables as everyone else.
+    Three deployments, three answers:
+
+    A checkout is its own data dir - the shop's tables are version controlled
+    and shared by pulling and committing them, so writes have to land in the
+    clone.
+
+    A frozen exe keeps them beside itself. That is what makes a copy of the
+    dist folder on a share work as one shared installation: everyone running
+    it reads and writes the same four CSVs, instead of each PC quietly growing
+    a private catalog under LOCALAPPDATA that nobody else ever sees. If the
+    share is read-only the per-user copy is the fallback, because the tool
+    still has to be able to learn a rule.
+
+    A pip install has nowhere safe to write - site-packages is replaced on the
+    next upgrade - so it gets the per-user directory too.
+
+    INVENTOR_TO_RADAN_DATA_DIR overrides all three.
     """
     override = os.environ.get("INVENTOR_TO_RADAN_DATA_DIR", "").strip()
     if override:
         return os.path.abspath(override)
+    if getattr(sys, "frozen", False):
+        beside_exe = os.path.dirname(os.path.abspath(sys.executable))
+        if _is_writable(beside_exe):
+            return beside_exe
+        return _user_data_dir()
     if os.path.exists(os.path.join(PKG_DIR, ".git")):
         return PKG_DIR
-    base = os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), ".local", "share")
-    return os.path.join(base, "inventor_to_radan")
+    return _user_data_dir()
 
 
 DATA_DIR = _resolve_data_dir()
