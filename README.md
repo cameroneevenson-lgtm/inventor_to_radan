@@ -29,6 +29,7 @@ Convert an Inventor BOM (`.csv` or `.xlsx`) into a Radan import CSV, with DXF ac
 - `report_writer.py` - audit report generation
 - `inline_runner.py` - headless/programmatic entry point (see "Programmatic use" below)
 - `cli.py` - the `inventor-to-radan` console script installed by pip; defers to `bom_converter.run_cli`
+- `__main__.py` - `python -m inventor_to_radan`, for when the scripts directory is not on `PATH`
 - `dialogs/` - `missing_dxf_dialog.py`, `radan_rule_dialog.py`, `report_review_dialog.py`
 - `inventor_to_radan.bat` - launcher script
 - `description_rules.csv` - per-description Radan rule table
@@ -45,8 +46,13 @@ Convert an Inventor BOM (`.csv` or `.xlsx`) into a Radan import CSV, with DXF ac
 ### Option A: pip (a machine that just needs to run the tool)
 
 ```powershell
-pip install "git+https://github.com/cameroneevenson-lgtm/inventor_to_radan.git"
+python -m pip install "git+https://github.com/cameroneevenson-lgtm/inventor_to_radan.git"
 ```
+
+Use `python -m pip`, not bare `pip`: it guarantees the package lands in the same
+interpreter that `python -m inventor_to_radan` will later use. A bare `pip` on `PATH` can
+belong to a different Python than `python` does, which installs successfully and then
+cannot be imported.
 
 The quotes and the lack of a space after `git+` both matter: `git+https` is the URL
 scheme, so `pip install git+ https://...` splits into two nonsense requirements and
@@ -55,13 +61,21 @@ archive format`. Requires Git for Windows on `PATH`. Without git, install the zi
 instead:
 
 ```powershell
-pip install "https://github.com/cameroneevenson-lgtm/inventor_to_radan/archive/refs/heads/main.zip"
+python -m pip install "https://github.com/cameroneevenson-lgtm/inventor_to_radan/archive/refs/heads/main.zip"
 ```
 
-Either one puts an `inventor-to-radan` command on `PATH`:
+Either one installs an `inventor-to-radan` command:
 
 ```powershell
 inventor-to-radan "W:\path\to\BOM.csv"
+```
+
+If that comes back "not recognized", pip put it in the per-user scripts directory
+(`%APPDATA%\Python\Python3XX\Scripts`), which is usually not on `PATH` - pip warns about
+this rather than failing. Either add that directory to `PATH`, or skip it entirely:
+
+```powershell
+python -m inventor_to_radan "W:\path\to\BOM.csv"
 ```
 
 **A pip install gets its own copy of the rule tables.** `description_rules.csv`,
