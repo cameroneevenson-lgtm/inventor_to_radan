@@ -22,7 +22,7 @@ Convert an Inventor BOM (`.csv` or `.xlsx`) into a Radan import CSV, with DXF ac
 
 ## Project files
 
-- `bom_converter.py` - main application logic (PySide6)
+- `bom_converter.py` - main application logic (tkinter)
 - `config.py` - paths and constants
 - `bom_reader.py` - BOM column detection and value coercion
 - `rule_store.py` - description-rule CSV load/save
@@ -106,12 +106,12 @@ shared by pulling and committing them - which is how the catalog grows.
 ```powershell
 git clone https://github.com/cameroneevenson-lgtm/inventor_to_radan.git
 cd inventor_to_radan
-python -m pip install pandas openpyxl pyside6
+python -m pip install openpyxl
 ```
 
 ### Option C: frozen exe (a machine with no Python at all)
 
-`build_verify_exe.bat` produces `dist\BOM Verify.exe` - a single ~50 MB file, nothing else
+`build_verify_exe.bat` produces `dist\BOM Verify.exe` - a single ~9 MB file, nothing else
 to copy. It is the **verification-only** build: it checks a BOM for missing DXFs and
 unknown descriptions and writes `*_report.txt` next to it, but does not produce the RADAN
 import CSV - that stays the laser programmer's artifact.
@@ -163,24 +163,26 @@ first thing to read.
 **The build uses `.buildvenv\`, not `C:\Tools\.venv`.** The shared venv carries every other
 tool's dependencies and PyInstaller bundles what it finds: builds from it were shipping
 80 MB of `pyarrow` (required by `streamlit`, not by pandas) plus scipy, matplotlib, PIL and
-cryptography - 235 MB of folder for a 50 MB app. The build script creates `.buildvenv` on
-first run with only `pandas openpyxl pyside6 pyinstaller`. Do not point it back at the
+cryptography - 235 MB of folder for what is now a 9 MB app. The build script creates
+`.buildvenv` on first run with only `openpyxl pyinstaller`. Do not point it back at the
 shared venv, and do not re-add a `--exclude-module` list to `BOM Verify.spec` to compensate;
 the packages are simply not there.
 
-`BOM Verify.spec` additionally drops Qt pieces this app never loads - the software OpenGL
-fallback, translations, the networking and TLS stack, unused image and platform plugins.
-Dropping `opengl32sw.dll` assumes a real GPU driver; if this ever has to run over Remote
-Desktop or in a VM, put it back.
+`BOM Verify.spec` additionally drops stdlib pieces nothing here loads: sqlite3, ssl, and
+`_hashlib`. That last one is worth knowing about - openpyxl imports `hashlib` to hash
+sheet-protection passwords this app never sets, and `_hashlib` is the OpenSSL binding that
+pulls in `libcrypto`, which was 5.2 MB of a 10.7 MB exe. Without it `hashlib` falls back to
+Python's built-in digests.
 
 ## Requirements
 
 - Windows
 - Python 3.10+ (recommended)
 - Packages (installed for you by Option A):
-  - `pandas`
   - `openpyxl` for `.xlsx` BOM files
-  - `pyside6`
+
+  The GUI is tkinter, which ships with Python. pandas and PySide6 were removed: they were
+  70 MB of the frozen exe and were doing work the standard library already does.
 
 ## Run
 

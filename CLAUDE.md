@@ -112,14 +112,23 @@ the per-user dir only when the location is read-only. `_resolve_seed_dir` finds 
 frozen defaults under `sys._MEIPASS`, and a build that omits `--add-data` seeds an empty
 catalog silently - the operator then re-teaches rules the shop already has.
 The build runs from `.buildvenv`, never `C:\Tools\.venv`: PyInstaller bundles whatever the
-venv holds, and the shared one made a 50 MB app into a 235 MB folder. Its spec is committed
-because `--exclude-module` cannot drop individual Qt DLLs.
+venv holds, and the shared one made a 9 MB app into a 235 MB folder. Its spec is committed
+so the exclusions stay reviewable.
 
 **The picker's shortlist must never offer a `*_Radan.csv`.** `bom_finder.py` scans the
 laser share for recent BOMs, and this tool's own output lands in the same folders as its
 input - listing one is how somebody converts a converted file. The scan is depth-bounded
 (jobs sit two levels under the root) and runs on a `QThread`: it is a network drive, and a
 share that is slow or unmapped would otherwise freeze the window before it ever appeared.
+
+**The GUI is tkinter and the BOM is a list of dicts - both were size decisions.** pandas
+and PySide6 were ~70 MB of the frozen exe while only reading spreadsheets and drawing four
+plain forms, so `bom_reader.py` uses `csv`/`openpyxl` and `dialogs/` uses tkinter via
+`dialogs/tk_base.py`, which keeps the old Qt protocol (`.exec()` returning `ACCEPTED`).
+Two pandas behaviours are load-bearing and were replicated deliberately: groupby sorted its
+keys, so the classify dialog's order and the output CSV's row order are sorted, and the CSV
+keeps CRLF. `truck_nest_explorer`'s copy of the review dialog is still Qt - that is TNE's
+file, and only the report *content* has to stay in step.
 
 ## Branching
 
