@@ -38,12 +38,7 @@ def _missing(package: str, install: str, cause: ImportError):
     raise MissingDependencyError(message) from cause
 
 
-try:
-    from PySide6.QtWidgets import (
-        QApplication, QDialog, QMessageBox
-    )
-except ImportError as exc:
-    _missing("PySide6", "pyside6", exc)
+from tkinter import messagebox
 
 from bom_reader import (
     BomTable,
@@ -71,6 +66,7 @@ from config import (
 from dialogs.missing_dxf_dialog import MissingDxfDialog as _MissingDxfDialog
 from dialogs.radan_rule_dialog import RadanRuleDialog as _RadanRuleDialog
 from dialogs.report_review_dialog import ReportReviewDialog
+from dialogs.tk_base import ACCEPTED, ensure_root
 from report_writer import write_report
 import rule_store
 
@@ -155,7 +151,7 @@ def read_bom(path: str) -> BomTable:
     return _read_bom(path, supported_extensions=SUPPORTED_BOM_EXTENSIONS)
 
 # ============================================================
-# PySide6: Stepped dialogs
+# Stepped dialogs (tkinter)
 # ============================================================
 
 class MissingDxfDialog(_MissingDxfDialog):
@@ -505,7 +501,7 @@ def convert_bom_to_radan_csv(
         if not allow_prompts:
             raise InventorToRadanNeedsUi(missing_dxf_items=prompt_unique)
         dlg = MissingDxfDialog(prompt_unique)
-        if dlg.exec() != QDialog.Accepted:
+        if dlg.exec() != ACCEPTED:
             raise InventorToRadanCancelled()
         expected_missing_rules = dlg.expected_descriptions
 
@@ -531,7 +527,7 @@ def convert_bom_to_radan_csv(
             raise InventorToRadanNeedsUi(missing_rules=missing_rules)
         else:
             dlg = RadanRuleDialog(missing_rules, ftq_descs)
-            if dlg.exec() != QDialog.Accepted:
+            if dlg.exec() != ACCEPTED:
                 raise InventorToRadanCancelled()
             rules = load_rules()
 
@@ -547,11 +543,10 @@ def convert_bom_to_radan_csv(
     )
     if show_summary:
         dialog = ReportReviewDialog(result)
-        if dialog.exec() != QDialog.Accepted:
+        if dialog.exec() != ACCEPTED:
             failed_deletes = delete_generated_outputs(result)
             if failed_deletes:
-                QMessageBox.warning(
-                    None,
+                messagebox.showwarning(
                     "Delete Inventor Output",
                     "Some generated files could not be deleted:\n\n" + "\n".join(failed_deletes),
                 )
@@ -577,7 +572,7 @@ def main(bom_path: str, *, write_csv: bool = True, collect_radan_rules: bool = T
 # ============================================================
 
 def run_cli(argv: list[str] | None = None, *, write_csv: bool = True) -> int:
-    """Argument handling and the QApplication bootstrap.
+    """Argument handling and the GUI bootstrap.
 
     Shared by the script run (the .bat drag-and-drop) and the installed
     `inventor-to-radan` command via `cli.py`, so the two cannot drift apart.
@@ -600,11 +595,11 @@ def run_cli(argv: list[str] | None = None, *, write_csv: bool = True) -> int:
         print("Drag a BOM (.csv or .xlsx) onto this script.")
         return 1
 
-    app = QApplication(sys.argv)  # noqa: F841 - must outlive the dialogs below
+    ensure_root()
     try:
         return main(args[0], write_csv=write_csv)
     except Exception as e:
-        QMessageBox.critical(None, "Error", f"{type(e).__name__}: {e}")
+        messagebox.showerror("Error", f"{type(e).__name__}: {e}")
         return 1
 
 

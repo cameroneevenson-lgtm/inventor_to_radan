@@ -1,25 +1,21 @@
 from __future__ import annotations
 
-import html
 import os
+import tkinter as tk
+from tkinter import messagebox, ttk
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QCheckBox,
-    QDialog,
-    QHBoxLayout,
-    QMessageBox,
-    QPushButton,
-    QScrollArea,
-    QTextEdit,
-    QVBoxLayout,
-    QWidget,
-)
+from dialogs.tk_base import TkDialog, make_label
 
-from dialogs.missing_dxf_dialog import make_label
+_COLORS = {
+    "base": "#111827",
+    "muted": "#475569",
+    "green": "#15803D",
+    "yellow": "#A16207",
+    "red": "#B91C1C",
+}
 
 
-class ReportReviewDialog(QDialog):
+class ReportReviewDialog(TkDialog):
     # Non-laser parts are green, not yellow: every line there matched a token
     # the operator already put in nonlaser_tokens.csv, so it confirms the
     # classification rather than asking for a decision. One BOM produced 18 of
@@ -36,15 +32,16 @@ class ReportReviewDialog(QDialog):
         "Cut to length from stock": "green",
     }
 
+    title = "Review Inventor-to-RADAN Report"
+
     def __init__(self, result, parent=None):
         super().__init__(parent)
         self.result = result
         self._acknowledged = False
-        self.setWindowTitle("Review Inventor-to-RADAN Report")
-        self.setWindowModality(Qt.ApplicationModal)
-        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
 
-        title = make_label("Review required before production use", bold=True)
+        make_label(self.body, "Review required before production use", bold=True).pack(
+            fill="x", anchor="w"
+        )
         warning_count = (
             len(result.expected_missing_dxfs)
             + len(result.orphan_dxfs)
@@ -57,127 +54,143 @@ class ReportReviewDialog(QDialog):
                 f"{warning_count - critical_count} review item(s). "
                 "Read the report below before acknowledging completion."
             )
-            detail_style = "color: #B91C1C;"
+            detail_color = _COLORS["red"]
         elif warning_count:
             detail_text = (
                 f"This report contains {warning_count} item(s) to check. "
                 "Read the yellow sections below before acknowledging completion."
             )
-            detail_style = "color: #A16207;"
+            detail_color = _COLORS["yellow"]
         else:
             detail_text = (
                 "No report warnings were found. Review the green confirmation sections before closing this conversion."
             )
-            detail_style = "color: #15803D;"
-        detail = make_label(detail_text, bold=True)
-        detail.setStyleSheet(detail_style)
+            detail_color = _COLORS["green"]
+        detail = make_label(self.body, detail_text, bold=True)
+        detail.configure(foreground=detail_color)
+        detail.pack(fill="x", anchor="w", pady=(2, 0))
 
-        path_label = make_label(f"Report: {result.report_path}")
+        make_label(self.body, f"Report: {result.report_path}").pack(fill="x", anchor="w", pady=(2, 6))
 
-        self.viewer = QTextEdit()
-        self.viewer.setReadOnly(True)
-        self.viewer.setLineWrapMode(QTextEdit.NoWrap)
         try:
             report_text = open(result.report_path, encoding="utf-8").read()
         except OSError as exc:
             report_text = f"Could not read report file:\n{exc}"
-        self.viewer.setHtml(self._report_html(report_text))
+
+        viewer_frame = ttk.Frame(self.body)
+        viewer_frame.pack(fill="both", expand=True)
+        self.viewer = tk.Text(
+            viewer_frame,
+            wrap="none",
+            font=("Consolas", 10),
+            background="#FFFFFF",
+            foreground=_COLORS["base"],
+        )
+        yscroll = ttk.Scrollbar(viewer_frame, orient="vertical", command=self.viewer.yview)
+        xscroll = ttk.Scrollbar(viewer_frame, orient="horizontal", command=self.viewer.xview)
+        self.viewer.configure(yscrollcommand=yscroll.set, xscrollcommand=xscroll.set)
+        yscroll.pack(side="right", fill="y")
+        xscroll.pack(side="bottom", fill="x")
+        self.viewer.pack(side="left", fill="both", expand=True)
+        self._render_report(report_text)
 
         # One checkbox per warning line, not one for the whole report. A
         # single "I reviewed this" box let a five-line report and a
         # fifty-line one take the same one click - F59270 Pump House was one
         # of the lines that click skipped past. Ticking each line by hand is
         # deliberately slower than reading a summary count.
-        self.line_checkboxes: list[QCheckBox] = []
-        checklist_layout = QVBoxLayout()
-        checklist_colors = {"red": "#B91C1C", "yellow": "#A16207"}
-        for level, line in self._warning_lines(report_text):
-            checkbox = QCheckBox(line)
-            checkbox.setStyleSheet(f"color: {checklist_colors[level]}; font-weight: 700;")
-            checkbox.stateChanged.connect(self._update_ack_button)
-            checklist_layout.addWidget(checkbox)
-            self.line_checkboxes.append(checkbox)
+        self.line_vars: list[tk.BooleanVar] = []
+        self._line_labels: list[str] = []
+        warning_lines = self._warning_lines(report_text)
+        if warning_lines:
+            make_label(
+                self.body,
+                "Check off every item below - each one, not just the box underneath:",
+                bold=True,
+            ).pack(fill="x", anchor="w", pady=(8, 2))
 
-        checklist_widget = QWidget()
-        checklist_widget.setLayout(checklist_layout)
-        checklist_scroll = QScrollArea()
-        checklist_scroll.setWidget(checklist_widget)
-        checklist_scroll.setWidgetResizable(True)
-        checklist_scroll.setMaximumHeight(200)
+            list_holder = ttk.Frame(self.body)
+            list_holder.pack(fill="x")
+            canvas = tk.Canvas(list_holder, height=min(200, 28 * len(warning_lines)))
+            scroll = ttk.Scrollbar(list_holder, orient="vertical", command=canvas.yview)
+            inner = ttk.Frame(canvas)
+            inner.bind(
+                "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            )
+            canvas.create_window((0, 0), window=inner, anchor="nw")
+            canvas.configure(yscrollcommand=scroll.set)
+            scroll.pack(side="right", fill="y")
+            canvas.pack(side="left", fill="x", expand=True)
 
-        self.chk_ack = QCheckBox("I have reviewed this report and understand any warnings before production.")
-        self.chk_ack.stateChanged.connect(self._update_ack_button)
+            for level, line in warning_lines:
+                var = tk.BooleanVar(master=self.window, value=False)
+                box = tk.Checkbutton(
+                    inner,
+                    text=line,
+                    variable=var,
+                    command=self._update_ack_button,
+                    foreground=_COLORS[level],
+                    activeforeground=_COLORS[level],
+                    font=("TkDefaultFont", 9, "bold"),
+                    anchor="w",
+                    justify="left",
+                )
+                box.pack(fill="x", anchor="w")
+                self.line_vars.append(var)
+                self._line_labels.append(line)
 
-        self.btn_open = QPushButton("Open Report File")
-        self.btn_open.clicked.connect(self.open_report)
-        self.btn_ack = QPushButton("Acknowledge Report")
-        self.btn_ack.setEnabled(False)
-        self.btn_ack.clicked.connect(self.accept)
-        self.btn_discard = QPushButton("Discard CSV/Report")
-        self.btn_discard.clicked.connect(self.reject)
+        self.ack_var = tk.BooleanVar(master=self.window, value=False)
+        tk.Checkbutton(
+            self.body,
+            text="I have reviewed this report and understand any warnings before production.",
+            variable=self.ack_var,
+            command=self._update_ack_button,
+            anchor="w",
+            justify="left",
+        ).pack(fill="x", anchor="w", pady=(6, 0))
 
-        btn_row = QHBoxLayout()
-        btn_row.addWidget(self.btn_open)
-        btn_row.addWidget(self.btn_discard)
-        btn_row.addWidget(self.btn_ack)
+        btn_row = ttk.Frame(self.body)
+        btn_row.pack(fill="x", pady=(10, 0))
+        ttk.Button(btn_row, text="Open Report File", command=self.open_report).pack(
+            side="left", expand=True, fill="x", padx=(0, 4)
+        )
+        ttk.Button(btn_row, text="Discard CSV/Report", command=self.reject).pack(
+            side="left", expand=True, fill="x", padx=4
+        )
+        self.btn_ack = ttk.Button(
+            btn_row, text="Acknowledge Report", command=self.accept, state="disabled"
+        )
+        self.btn_ack.pack(side="left", expand=True, fill="x", padx=(4, 0))
 
-        lay = QVBoxLayout()
-        lay.addWidget(title)
-        lay.addWidget(detail)
-        lay.addWidget(path_label)
-        lay.addWidget(self.viewer, 1)
-        if self.line_checkboxes:
-            lay.addWidget(make_label("Check off every item below - each one, not just the box underneath:", bold=True))
-            lay.addWidget(checklist_scroll)
-        lay.addWidget(self.chk_ack)
-        lay.addLayout(btn_row)
-        self.setLayout(lay)
-        self.resize(920, 680)
+        self.window.geometry("920x680")
 
-    @classmethod
-    def _report_html(cls, report_text: str) -> str:
-        colors = {
-            "base": "#111827",
-            "muted": "#475569",
-            "green": "#15803D",
-            "yellow": "#A16207",
-            "red": "#B91C1C",
-        }
+    def _render_report(self, report_text: str) -> None:
+        for name, color in _COLORS.items():
+            self.viewer.tag_configure(name, foreground=color)
+            self.viewer.tag_configure(
+                name + "_bold", foreground=color, font=("Consolas", 10, "bold")
+            )
+
         active_level = ""
-        rows: list[str] = []
         for line in report_text.splitlines():
             stripped = line.strip()
             if stripped.endswith(":"):
                 active_level = ""
-                for section, level in cls.REVIEW_SECTION_LEVELS.items():
+                for section, level in self.REVIEW_SECTION_LEVELS.items():
                     if stripped.startswith(section):
                         active_level = level
                         break
-                color = colors.get(active_level, colors["base"])
-                weight = "700" if active_level else "600"
+                tag = (active_level + "_bold") if active_level else "base_bold"
             elif stripped == "(none)" and active_level:
-                color = colors["green"]
-                weight = "700"
+                tag = "green_bold"
             elif stripped and active_level:
-                color = colors[active_level]
-                weight = "700"
+                tag = active_level + "_bold"
             elif stripped:
-                color = colors["base"]
-                weight = "400"
+                tag = "base"
             else:
-                color = colors["muted"]
-                weight = "400"
-            rows.append(
-                "<div style='white-space: pre-wrap; "
-                f"color: {color}; font-weight: {weight};'>"
-                f"{html.escape(line) or '&nbsp;'}</div>"
-            )
-        body = "\n".join(rows)
-        return (
-            "<html><body style='font-family: Consolas, monospace; "
-            "font-size: 10pt; background: #FFFFFF;'>"
-            f"{body}</body></html>"
-        )
+                tag = "muted"
+            self.viewer.insert("end", line + "\n", tag)
+        self.viewer.configure(state="disabled")
 
     @classmethod
     def _warning_lines(cls, report_text: str) -> list[tuple[str, str]]:
@@ -201,24 +214,50 @@ class ReportReviewDialog(QDialog):
                 lines.append((active_level, stripped))
         return lines
 
+    # ---- behaviour accessors
+    #
+    # The review gate is the app's most load-bearing UI rule (see the F59270
+    # Pump House regression), so it is tested directly. These keep those tests
+    # about the rule - which lines need a tick, when the button unlocks -
+    # rather than about whichever toolkit is drawing it this year.
+
+    def checklist_labels(self) -> list[str]:
+        return list(self._line_labels)
+
+    def set_line_checked(self, index: int, checked: bool = True) -> None:
+        self.line_vars[index].set(checked)
+        self._update_ack_button()
+
+    def set_acknowledged(self, checked: bool = True) -> None:
+        self.ack_var.set(checked)
+        self._update_ack_button()
+
+    def ack_enabled(self) -> bool:
+        return str(self.btn_ack.cget("state")) == "normal"
+
+    def close(self) -> None:
+        if self.window.winfo_exists():
+            self.window.destroy()
+
     def _update_ack_button(self):
-        all_lines_checked = all(cb.isChecked() for cb in self.line_checkboxes)
-        self.btn_ack.setEnabled(self.chk_ack.isChecked() and all_lines_checked)
+        all_lines_checked = all(var.get() for var in self.line_vars)
+        state = "normal" if (self.ack_var.get() and all_lines_checked) else "disabled"
+        self.btn_ack.configure(state=state)
 
     def open_report(self):
         try:
             os.startfile(self.result.report_path)  # type: ignore[attr-defined]
         except Exception as exc:
-            QMessageBox.warning(self, "Open Report", str(exc))
+            messagebox.showwarning("Open Report", str(exc), parent=self.window)
 
     def accept(self):
-        unchecked = sum(1 for cb in self.line_checkboxes if not cb.isChecked())
-        if unchecked or not self.chk_ack.isChecked():
+        unchecked = sum(1 for var in self.line_vars if not var.get())
+        if unchecked or not self.ack_var.get():
             detail = f"{unchecked} item(s) above are still unchecked. " if unchecked else ""
-            QMessageBox.warning(
-                self,
+            messagebox.showwarning(
                 "Review Required",
                 f"{detail}Check off every item and the acknowledgement box before continuing.",
+                parent=self.window,
             )
             return
         self._acknowledged = True
@@ -226,33 +265,15 @@ class ReportReviewDialog(QDialog):
 
     def reject(self):
         if not self._acknowledged:
-            choice = QMessageBox.question(
-                self,
+            if not messagebox.askyesno(
                 "Discard Inventor Output?",
                 "Close without acknowledging this report?\n\n"
                 "The generated RADAN CSV and report will be deleted.",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if choice != QMessageBox.Yes:
+                default="no",
+                parent=self.window,
+            ):
                 return
-            super().reject()
-            return
         super().reject()
 
-    def closeEvent(self, event):
-        if self._acknowledged:
-            event.accept()
-            return
-        choice = QMessageBox.question(
-            self,
-            "Discard Inventor Output?",
-            "Close without acknowledging this report?\n\n"
-            "The generated RADAN CSV and report will be deleted.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if choice == QMessageBox.Yes:
-            event.accept()
-            return
-        event.ignore()
+    def on_close(self):
+        self.reject()

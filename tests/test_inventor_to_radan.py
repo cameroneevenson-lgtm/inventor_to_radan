@@ -146,7 +146,7 @@ class InventorToRadanTests(unittest.TestCase):
                 self.expected_descriptions = [item["desc"] for item in items]
 
             def exec(self):
-                return bom_converter.QDialog.Accepted
+                return bom_converter.ACCEPTED
 
         class AcceptRuleDialog:
             def __init__(self, descriptions, ftq_descriptions):
@@ -155,7 +155,7 @@ class InventorToRadanTests(unittest.TestCase):
             def exec(self):
                 for description in self.descriptions:
                     bom_converter.append_rule(description, "Aluminum 5052", "0.125", "Air")
-                return bom_converter.QDialog.Accepted
+                return bom_converter.ACCEPTED
 
         with (
             self.patch_config_paths(),
@@ -297,7 +297,7 @@ class MissingDependencyTests(unittest.TestCase):
     def test_it_is_catchable_as_an_ordinary_exception(self) -> None:
         """The property that was missing. `except Exception` must see it."""
         try:
-            bom_converter._missing("PySide6", "pyside6", ImportError("boom"))
+            bom_converter._missing("openpyxl", "openpyxl", ImportError("boom"))
         except Exception as exc:
             self.assertIsInstance(exc, ImportError)
         else:
@@ -626,7 +626,7 @@ class UpstreamPromptTests(unittest.TestCase):
                 self.expected_descriptions = [item["desc"] for item in items]
 
             def exec(self):
-                return bom_converter.QDialog.Accepted
+                return bom_converter.ACCEPTED
 
         with (
             self.patch_config_paths(),

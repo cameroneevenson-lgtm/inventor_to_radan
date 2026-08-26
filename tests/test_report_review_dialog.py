@@ -9,9 +9,8 @@ PROJECT_DIR = Path(__file__).resolve().parents[1]
 if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
 
-from PySide6.QtWidgets import QApplication
-
 from dialogs.report_review_dialog import ReportReviewDialog
+from dialogs.tk_base import ensure_root
 
 
 @dataclass(frozen=True)
@@ -24,9 +23,23 @@ class _FakeResult:
 
 
 class ReportReviewDialogTests(unittest.TestCase):
+    """These assert the review gate's rule, not its widgets: the dialog exposes
+    checklist_labels / set_line_checked / set_acknowledged / ack_enabled so the
+    rule survives a change of toolkit, which is exactly what happened when the
+    app moved off Qt."""
+
     @classmethod
     def setUpClass(cls) -> None:
-        cls.app = QApplication.instance() or QApplication([])
+        ensure_root()
+
+    def build(self, report_text: str, **result_kwargs) -> ReportReviewDialog:
+        report_path = Path(self.id().replace(".", "_") + "_report.txt").resolve()
+        report_path.write_text(report_text, encoding="utf-8")
+        self.addCleanup(report_path.unlink, missing_ok=True)
+
+        dialog = ReportReviewDialog(_FakeResult(report_path=str(report_path), **result_kwargs))
+        self.addCleanup(dialog.close)
+        return dialog
 
     def test_warning_lines_skips_headers_and_none(self) -> None:
         report_text = (
@@ -50,6 +63,18 @@ class ReportReviewDialogTests(unittest.TestCase):
             ],
         )
 
+    def test_new_descriptions_need_a_tick(self) -> None:
+        """A verification run cannot resolve these itself, so they are a yellow
+        item somebody has to see - not a green confirmation."""
+        report_text = (
+            "New descriptions (laser, but no RADAN rule yet):\n"
+            "  TITANIUM SPACE PANEL 9000\n"
+        )
+        self.assertEqual(
+            ReportReviewDialog._warning_lines(report_text),
+            [("yellow", "TITANIUM SPACE PANEL 9000")],
+        )
+
     def test_nonlaser_parts_are_not_checkboxes(self) -> None:
         """Token-classified non-laser parts confirm a rule the operator already
         wrote; they are not decisions. A BOM with 18 of them must not put 18
@@ -65,28 +90,22 @@ class ReportReviewDialogTests(unittest.TestCase):
             "  STEEL-1.5x1.5x0.125\n"
             "  UNISTRUT-P1000\n"
         )
-        report_path = Path(self.id().replace(".", "_") + "_report.txt").resolve()
-        report_path.write_text(report_text, encoding="utf-8")
-        self.addCleanup(report_path.unlink, missing_ok=True)
-
         self.assertEqual(
             ReportReviewDialog._warning_lines(report_text),
             [("yellow", "8500-f55900-11.dxf")],
         )
 
-        result = _FakeResult(
-            report_path=str(report_path),
+        dialog = self.build(
+            report_text,
             orphan_dxfs=("8500-f55900-11.dxf",),
             nonlaser_parts=("STEEL-1.5x1.5x0.125", "UNISTRUT-P1000"),
         )
-        dialog = ReportReviewDialog(result)
-        self.addCleanup(dialog.deleteLater)
 
-        self.assertEqual([cb.text() for cb in dialog.line_checkboxes], ["8500-f55900-11.dxf"])
+        self.assertEqual(dialog.checklist_labels(), ["8500-f55900-11.dxf"])
 
-        dialog.chk_ack.setChecked(True)
-        dialog.line_checkboxes[0].setChecked(True)
-        self.assertTrue(dialog.btn_ack.isEnabled())
+        dialog.set_acknowledged(True)
+        dialog.set_line_checked(0, True)
+        self.assertTrue(dialog.ack_enabled())
 
     def test_ack_button_requires_every_line_checked(self) -> None:
         """Regression for F59270 Pump House: a single blanket checkbox let a
@@ -101,32 +120,26 @@ class ReportReviewDialogTests(unittest.TestCase):
             "Orphan DXFs (in folder but not referenced by BOM):\n"
             "  8500-f55900-11.dxf\n"
         )
-        report_path = Path(self.id().replace(".", "_") + "_report.txt").resolve()
-        report_path.write_text(report_text, encoding="utf-8")
-        self.addCleanup(report_path.unlink, missing_ok=True)
-
-        result = _FakeResult(
-            report_path=str(report_path),
+        dialog = self.build(
+            report_text,
             expected_missing_dxfs=("8500-F55985-11.dxf",),
             orphan_dxfs=("8500-f55900-11.dxf",),
         )
-        dialog = ReportReviewDialog(result)
-        self.addCleanup(dialog.deleteLater)
 
-        self.assertEqual(len(dialog.line_checkboxes), 2)
-        self.assertFalse(dialog.btn_ack.isEnabled())
+        self.assertEqual(len(dialog.checklist_labels()), 2)
+        self.assertFalse(dialog.ack_enabled())
 
-        dialog.chk_ack.setChecked(True)
-        self.assertFalse(dialog.btn_ack.isEnabled(), "still missing per-line acks")
+        dialog.set_acknowledged(True)
+        self.assertFalse(dialog.ack_enabled(), "still missing per-line acks")
 
-        dialog.line_checkboxes[0].setChecked(True)
-        self.assertFalse(dialog.btn_ack.isEnabled(), "one of two lines is not enough")
+        dialog.set_line_checked(0, True)
+        self.assertFalse(dialog.ack_enabled(), "one of two lines is not enough")
 
-        dialog.line_checkboxes[1].setChecked(True)
-        self.assertTrue(dialog.btn_ack.isEnabled())
+        dialog.set_line_checked(1, True)
+        self.assertTrue(dialog.ack_enabled())
 
-        dialog.line_checkboxes[0].setChecked(False)
-        self.assertFalse(dialog.btn_ack.isEnabled(), "unchecking a line must disable it again")
+        dialog.set_line_checked(0, False)
+        self.assertFalse(dialog.ack_enabled(), "unchecking a line must disable it again")
 
     def test_no_warnings_means_no_line_checkboxes(self) -> None:
         report_text = (
@@ -136,17 +149,11 @@ class ReportReviewDialogTests(unittest.TestCase):
             "Orphan DXFs (in folder but not referenced by BOM):\n"
             "  (none)\n"
         )
-        report_path = Path(self.id().replace(".", "_") + "_report.txt").resolve()
-        report_path.write_text(report_text, encoding="utf-8")
-        self.addCleanup(report_path.unlink, missing_ok=True)
+        dialog = self.build(report_text)
 
-        result = _FakeResult(report_path=str(report_path))
-        dialog = ReportReviewDialog(result)
-        self.addCleanup(dialog.deleteLater)
-
-        self.assertEqual(dialog.line_checkboxes, [])
-        dialog.chk_ack.setChecked(True)
-        self.assertTrue(dialog.btn_ack.isEnabled())
+        self.assertEqual(dialog.checklist_labels(), [])
+        dialog.set_acknowledged(True)
+        self.assertTrue(dialog.ack_enabled())
 
 
 if __name__ == "__main__":

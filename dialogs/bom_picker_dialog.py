@@ -1,22 +1,13 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
-
-from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtWidgets import (
-    QAbstractItemView,
-    QDialog,
-    QFileDialog,
-    QHBoxLayout,
-    QLabel,
-    QListWidget,
-    QListWidgetItem,
-    QPushButton,
-    QVBoxLayout,
-)
+import tkinter as tk
+from tkinter import filedialog, ttk
 
 from bom_finder import find_recent_boms
+from dialogs.tk_base import ACCEPTED, TkDialog, make_label
 
 # Scanned once per process, not once per dialog. verify_main reopens the picker
 # after every run, and paying the share walk again each time would make the
@@ -24,160 +15,153 @@ from bom_finder import find_recent_boms
 _SHORTLIST_CACHE: list[tuple[str, float]] | None = None
 
 
-class _ScanThread(QThread):
-    """Walks the share off the UI thread.
-
-    Warm it is about a second, but this is a network drive: cold, busy, or with
-    W: not mapped it can block for much longer, and a frozen window on startup
-    is precisely the "nothing happens" failure this app has already worn once.
-    """
-
-    finished_scan = Signal(list)
-
-    def __init__(self, scan: dict, parent=None):
-        super().__init__(parent)
-        self._scan = dict(scan)
-
-    def run(self) -> None:
-        try:
-            hits = find_recent_boms(**self._scan)
-        except Exception:
-            hits = []
-        self.finished_scan.emit(hits)
-
-
-class BomPickerDialog(QDialog):
+class BomPickerDialog(TkDialog):
     """Front door for the frozen verification build.
 
     The .bat launcher takes its BOM by drag-and-drop, but an exe opened from a
     shortcut gets no argument at all, so it has to ask. The shortlist is there
     because the answer is nearly always one of the last few BOMs exported to
     the share, and navigating to it by hand is the slow part.
+
+    The share walk runs on a worker thread and the window polls for its
+    result. Warm it is about a second, but this is a network drive: cold,
+    busy, or with W: not mapped it can block for much longer, and a frozen
+    window on startup is precisely the "nothing happens" failure this app has
+    already worn once.
     """
+
+    title = "Verify Inventor BOM"
+    topmost = False
 
     def __init__(self, data_dir: str, scan: dict, parent=None):
         super().__init__(parent)
         self.selected_path: str | None = None
         self._scan_settings = dict(scan)
-        self._scan: _ScanThread | None = None
         self._search_root = self._scan_settings.get("root", "")
+        self._scan_result: list | None = None
+        self._paths: list[str] = []
 
-        self.setWindowTitle("Verify Inventor BOM")
-        self.setMinimumWidth(560)
-
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(
+        make_label(
+            self.body,
             "Check an Inventor BOM for missing DXFs and unknown descriptions.\n"
-            "Writes a report next to the BOM. No RADAN CSV is produced."
-        ))
+            "Writes a report next to the BOM. No RADAN CSV is produced.",
+        ).pack(fill="x", anchor="w")
 
-        self.list_label = QLabel()
-        layout.addWidget(self.list_label)
+        self.list_label = make_label(self.body, "")
+        self.list_label.pack(fill="x", anchor="w", pady=(8, 2))
 
-        self.list = QListWidget()
-        self.list.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.list.itemDoubleClicked.connect(self._accept_item)
-        self.list.itemSelectionChanged.connect(self._sync_verify_button)
-        layout.addWidget(self.list)
+        list_frame = ttk.Frame(self.body)
+        list_frame.pack(fill="both", expand=True)
+        self.listbox = tk.Listbox(list_frame, font=("Consolas", 10), activestyle="none")
+        scroll = ttk.Scrollbar(list_frame, orient="vertical", command=self.listbox.yview)
+        self.listbox.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        self.listbox.pack(side="left", fill="both", expand=True)
+        self.listbox.bind("<Double-Button-1>", lambda e: self._accept_selected())
+        self.listbox.bind("<<ListboxSelect>>", lambda e: self._sync_verify_button())
+        self.listbox.bind("<Return>", lambda e: self._accept_selected())
 
-        self.status = QLabel("No BOM selected.")
-        self.status.setWordWrap(True)
-        layout.addWidget(self.status)
+        self.status = make_label(self.body, "No BOM selected.")
+        self.status.pack(fill="x", anchor="w", pady=(6, 0))
+        make_label(self.body, f"Rule tables: {data_dir}").pack(fill="x", anchor="w")
 
-        rules = QLabel(f"Rule tables: {data_dir}")
-        rules.setWordWrap(True)
-        layout.addWidget(rules)
+        buttons = ttk.Frame(self.body)
+        buttons.pack(fill="x", pady=(10, 0))
+        self.verify_button = ttk.Button(
+            buttons, text="Verify Selected", command=self._accept_selected, state="disabled"
+        )
+        self.verify_button.pack(side="left", expand=True, fill="x", padx=(0, 4))
+        ttk.Button(buttons, text="Select BOM...", command=self.choose_bom).pack(
+            side="left", expand=True, fill="x", padx=4
+        )
+        self.refresh_button = ttk.Button(
+            buttons, text="Refresh", command=lambda: self.start_scan(force=True)
+        )
+        self.refresh_button.pack(side="left", expand=True, fill="x", padx=4)
+        ttk.Button(buttons, text="Close", command=self.reject).pack(
+            side="left", expand=True, fill="x", padx=(4, 0)
+        )
 
-        buttons = QHBoxLayout()
-        self.verify_button = QPushButton("Verify Selected")
-        self.verify_button.setDefault(True)
-        self.verify_button.setEnabled(False)
-        self.verify_button.clicked.connect(self._accept_selected)
-        buttons.addWidget(self.verify_button)
-
-        browse = QPushButton("Select BOM...")
-        browse.clicked.connect(self.choose_bom)
-        buttons.addWidget(browse)
-
-        self.refresh_button = QPushButton("Refresh")
-        self.refresh_button.clicked.connect(lambda: self.start_scan(force=True))
-        buttons.addWidget(self.refresh_button)
-
-        close = QPushButton("Close")
-        close.clicked.connect(self.reject)
-        buttons.addWidget(close)
-        layout.addLayout(buttons)
-
+        self.window.geometry("640x460")
         self.start_scan()
 
     # ---- shortlist
 
     def start_scan(self, *, force: bool = False) -> None:
-        global _SHORTLIST_CACHE
-
         if not self._search_root:
-            self.list_label.setText("Recent BOMs: shortlist disabled.")
+            self.list_label.configure(text="Recent BOMs: shortlist disabled.")
             return
         if _SHORTLIST_CACHE is not None and not force:
             self._populate(_SHORTLIST_CACHE)
             return
 
-        self.list_label.setText(f"Recent BOMs in {self._search_root} - scanning...")
-        self.refresh_button.setEnabled(False)
-        self._scan = _ScanThread(self._scan_settings, self)
-        self._scan.finished_scan.connect(self._scan_done)
-        self._scan.start()
+        self.list_label.configure(text=f"Recent BOMs in {self._search_root} - scanning...")
+        self.refresh_button.configure(state="disabled")
+        self._scan_result = None
 
-    def _scan_done(self, hits: list) -> None:
+        def worker(settings=dict(self._scan_settings)):
+            try:
+                hits = find_recent_boms(**settings)
+            except Exception:
+                hits = []
+            self._scan_result = hits
+
+        threading.Thread(target=worker, daemon=True).start()
+        self.window.after(100, self._poll_scan)
+
+    def _poll_scan(self) -> None:
+        if not self.window.winfo_exists():
+            return
+        if self._scan_result is None:
+            self.window.after(100, self._poll_scan)
+            return
         global _SHORTLIST_CACHE
-        _SHORTLIST_CACHE = hits
-        self.refresh_button.setEnabled(True)
-        self._populate(hits)
+        _SHORTLIST_CACHE = self._scan_result
+        self.refresh_button.configure(state="normal")
+        self._populate(self._scan_result)
 
     def _populate(self, hits: list[tuple[str, float]]) -> None:
-        self.list.clear()
+        self.listbox.delete(0, "end")
+        self._paths = []
         if not hits:
-            self.list_label.setText(
-                f"Recent BOMs in {self._search_root} - none found (drive not mapped?)."
+            self.list_label.configure(
+                text=f"Recent BOMs in {self._search_root} - none found (drive not mapped?)."
             )
             self._sync_verify_button()
             return
 
-        self.list_label.setText(f"Recent BOMs in {self._search_root}:")
+        self.list_label.configure(text=f"Recent BOMs in {self._search_root}:")
         for path, mtime in hits:
             when = time.strftime("%Y-%m-%d", time.localtime(mtime))
             job = os.path.basename(os.path.dirname(path))
-            item = QListWidgetItem(f"{when}   {os.path.basename(path)}   [{job}]")
-            item.setData(Qt.UserRole, path)
-            item.setToolTip(path)
-            self.list.addItem(item)
+            self.listbox.insert("end", f"{when}   {os.path.basename(path)}   [{job}]")
+            self._paths.append(path)
         self._sync_verify_button()
 
     def _sync_verify_button(self) -> None:
-        self.verify_button.setEnabled(self.list.currentItem() is not None)
+        state = "normal" if self.listbox.curselection() else "disabled"
+        self.verify_button.configure(state=state)
 
     # ---- selection
 
-    def _accept_item(self, item: QListWidgetItem) -> None:
-        self.selected_path = item.data(Qt.UserRole)
-        self.accept()
-
     def _accept_selected(self) -> None:
-        item = self.list.currentItem()
-        if item is not None:
-            self._accept_item(item)
+        selection = self.listbox.curselection()
+        if not selection:
+            return
+        self.selected_path = self._paths[selection[0]]
+        self.accept()
 
     def choose_bom(self) -> None:
         start_dir = self._search_root if os.path.isdir(self._search_root) else ""
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select an Inventor BOM",
-            start_dir,
-            "BOM files (*.csv *.xlsx);;All files (*)",
+        path = filedialog.askopenfilename(
+            parent=self.window,
+            title="Select an Inventor BOM",
+            initialdir=start_dir,
+            filetypes=[("BOM files", "*.csv *.xlsx"), ("All files", "*")],
         )
         if not path:
             return
-        self.selected_path = path
+        self.selected_path = os.path.normpath(path)
         self.accept()
 
 
@@ -189,7 +173,7 @@ def pick_bom(data_dir: str, scan: dict, last_message: str = "") -> str | None:
     """
     dialog = BomPickerDialog(data_dir, scan)
     if last_message:
-        dialog.status.setText(last_message)
-    if dialog.exec() != QDialog.Accepted:
+        dialog.status.configure(text=last_message)
+    if dialog.exec() != ACCEPTED:
         return None
     return dialog.selected_path

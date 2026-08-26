@@ -10,6 +10,9 @@ REM was shipping 80 MB of pyarrow because streamlit requires it, plus scipy,
 REM matplotlib, PIL and cryptography. A venv of this project's own is the
 REM difference between a 235 MB build and a 50 MB one, and it does not grow
 REM every time somebody installs something into C:\Tools\.venv.
+REM
+REM The app itself needs only openpyxl now: pandas and PySide6 were removed,
+REM which is what took the exe from 50 MB to roughly 12.
 
 REM Do not delete dist\ before building. Once the exe has been deployed the CSVs
 REM beside it are the live rule tables; PyInstaller only replaces the exe and
@@ -28,7 +31,7 @@ if not exist "%PY%" (
     exit /b 1
   )
   "%PY%" -m pip install --upgrade pip
-  "%PY%" -m pip install pandas openpyxl pyside6 pyinstaller
+  "%PY%" -m pip install openpyxl pyinstaller
   if errorlevel 1 (
     echo ERROR: could not install build dependencies.
     pause

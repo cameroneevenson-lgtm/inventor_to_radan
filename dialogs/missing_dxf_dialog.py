@@ -1,33 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from tkinter import messagebox, ttk
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QDialog,
-    QHBoxLayout,
-    QLabel,
-    QMessageBox,
-    QPushButton,
-    QSizePolicy,
-    QSpacerItem,
-    QVBoxLayout,
-)
+from dialogs.tk_base import TkDialog, make_label
 
 
-def make_label(text: str, bold=False, wrap=True) -> QLabel:
-    lab = QLabel(text)
-    lab.setTextInteractionFlags(Qt.TextSelectableByMouse)
-    if wrap:
-        lab.setWordWrap(True)
-    if bold:
-        f = lab.font()
-        f.setBold(True)
-        lab.setFont(f)
-    return lab
-
-
-class MissingDxfDialog(QDialog):
+class MissingDxfDialog(TkDialog):
     """
     Step through UNKNOWN missing-DXF descriptions and force a classification:
       - Non-Laser: store FIRST TOKEN to nonlaser_tokens.csv
@@ -37,6 +16,9 @@ class MissingDxfDialog(QDialog):
 
     Sanity feature: shows current Non-Laser token list from disk inside the dialog.
     """
+
+    title = "DXF Accountability: Missing DXF Classification"
+
     def __init__(
         self,
         items: list[dict],
@@ -50,68 +32,64 @@ class MissingDxfDialog(QDialog):
         self.nonlaser_tokens_csv = nonlaser_tokens_csv
         self._load_set = load_set
         self._append_unique = append_unique
-        self.setWindowTitle("DXF Accountability: Missing DXF Classification")
-        self.setWindowModality(Qt.ApplicationModal)
-        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
 
         self.items = items
         self.i = 0
         self.expected_descriptions: list[str] = []
 
-        self.lbl_progress = make_label("")
-        self.lbl_desc = make_label("", bold=True)
-        self.lbl_token = make_label("")
-        self.lbl_count = make_label("")
+        self.lbl_progress = make_label(self.body, "")
+        self.lbl_desc = make_label(self.body, "", bold=True)
+        self.lbl_token = make_label(self.body, "")
+        self.lbl_count = make_label(self.body, "")
 
         note = (
             "No DXF exists for this BOM entry.\n\n"
-            "• Mark as Non-Laser → stores FIRST TOKEN only (family-level) in nonlaser_tokens.csv\n"
-            "• Expected Laser → defines a complete description_rules.csv entry next\n"
-            "   and lists this part as an expected missing DXF in the final report.\n"
+            "- Mark as Non-Laser: stores FIRST TOKEN only (family-level) in nonlaser_tokens.csv\n"
+            "- Expected Laser: defines a complete description_rules.csv entry next\n"
+            "  and lists this part as an expected missing DXF in the final report.\n"
         )
-        self.lbl_note = make_label(note)
+        self.lbl_note = make_label(self.body, note)
 
-        self.lbl_nonlaser_title = make_label("Current Non-Laser token list (from disk):", bold=True)
-        self.lbl_nonlaser_list = make_label("", wrap=True)
-        self.lbl_nonlaser_list.setMinimumHeight(90)
+        self.lbl_nonlaser_title = make_label(
+            self.body, "Current Non-Laser token list (from disk):", bold=True
+        )
+        self.lbl_nonlaser_list = make_label(self.body, "")
 
-        self.btn_nonlaser = QPushButton("Mark as Non-Laser")
-        self.btn_expected = QPushButton("Expected Laser - Define RADAN Rule")
+        for widget in (
+            self.lbl_progress,
+            self.lbl_desc,
+            self.lbl_token,
+            self.lbl_count,
+            self.lbl_note,
+            self.lbl_nonlaser_title,
+            self.lbl_nonlaser_list,
+        ):
+            widget.pack(fill="x", pady=2, anchor="w")
 
-        self.btn_nonlaser.clicked.connect(self.choose_nonlaser)
-        self.btn_expected.clicked.connect(self.choose_expected)
+        btn_row = ttk.Frame(self.body)
+        btn_row.pack(side="bottom", fill="x", pady=(10, 0))
+        self.btn_nonlaser = ttk.Button(
+            btn_row, text="Mark as Non-Laser", command=self.choose_nonlaser
+        )
+        self.btn_expected = ttk.Button(
+            btn_row, text="Expected Laser - Define RADAN Rule", command=self.choose_expected
+        )
+        self.btn_nonlaser.pack(side="left", expand=True, fill="x", padx=(0, 4))
+        self.btn_expected.pack(side="left", expand=True, fill="x", padx=(4, 0))
 
-        btn_row = QHBoxLayout()
-        btn_row.addWidget(self.btn_nonlaser)
-        btn_row.addWidget(self.btn_expected)
-
-        lay = QVBoxLayout()
-        lay.addWidget(self.lbl_progress)
-        lay.addWidget(self.lbl_desc)
-        lay.addWidget(self.lbl_token)
-        lay.addWidget(self.lbl_count)
-        lay.addSpacing(8)
-        lay.addWidget(self.lbl_note)
-        lay.addSpacing(10)
-        lay.addWidget(self.lbl_nonlaser_title)
-        lay.addWidget(self.lbl_nonlaser_list)
-        lay.addItem(QSpacerItem(10, 10, QSizePolicy.Minimum, QSizePolicy.Expanding))
-        lay.addLayout(btn_row)
-        self.setLayout(lay)
-
-        self.resize(760, 620)
+        self.window.geometry("760x620")
         self.load_step()
 
     def _refresh_nonlaser_list(self):
         toks = sorted(self._load_set(self.nonlaser_tokens_csv, "Token"))
         if not toks:
-            self.lbl_nonlaser_list.setText("(none yet)")
+            self.lbl_nonlaser_list.configure(text="(none yet)")
             return
         if len(toks) <= 40:
             text = ", ".join(toks)
         else:
             text = ", ".join(toks[:40]) + f" ... (+{len(toks)-40} more)"
-        self.lbl_nonlaser_list.setText(text)
+        self.lbl_nonlaser_list.configure(text=text)
 
     def load_step(self):
         it = self.items[self.i]
@@ -119,10 +97,12 @@ class MissingDxfDialog(QDialog):
         tok = it["token"]
         cnt = it.get("count", 0)
 
-        self.lbl_progress.setText(f"{self.i+1} of {len(self.items)}")
-        self.lbl_desc.setText(f"Description (full):\n{desc}")
-        self.lbl_token.setText(f"Non-laser family key (first token): {tok if tok else '(blank)'}")
-        self.lbl_count.setText(f"Occurrences (missing DXF): {cnt}")
+        self.lbl_progress.configure(text=f"{self.i+1} of {len(self.items)}")
+        self.lbl_desc.configure(text=f"Description (full):\n{desc}")
+        self.lbl_token.configure(
+            text=f"Non-laser family key (first token): {tok if tok else '(blank)'}"
+        )
+        self.lbl_count.configure(text=f"Occurrences (missing DXF): {cnt}")
 
         self._refresh_nonlaser_list()
 
@@ -130,7 +110,11 @@ class MissingDxfDialog(QDialog):
         it = self.items[self.i]
         tok = it["token"]
         if not tok:
-            QMessageBox.critical(self, "Missing token", "Cannot classify as non-laser because the first token is blank.")
+            messagebox.showerror(
+                "Missing token",
+                "Cannot classify as non-laser because the first token is blank.",
+                parent=self.window,
+            )
             return
         self._append_unique(self.nonlaser_tokens_csv, ["Token"], [tok])
         self.next_step()

@@ -49,13 +49,14 @@ def record_crash(exc: BaseException) -> str:
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
 
-    from PySide6.QtWidgets import QApplication, QMessageBox
+    from tkinter import messagebox
 
     import bom_converter
     import config
     from dialogs.bom_picker_dialog import pick_bom
+    from dialogs.tk_base import ensure_root
 
-    app = QApplication(sys.argv)  # noqa: F841 - must outlive the dialogs below
+    ensure_root()
     bom_converter.ensure_config_csvs()
 
     def verify_one(bom_path: str) -> str:
@@ -73,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         except bom_converter.InventorToRadanReportRejected:
             return f"{name}: report discarded, nothing kept."
         except Exception as exc:
-            QMessageBox.critical(None, "Error", f"{type(exc).__name__}: {exc}")
+            messagebox.showerror("Error", f"{type(exc).__name__}: {exc}")
             return f"{name}: {type(exc).__name__}."
         return f"{name}: checked. Report written next to the BOM."
 
@@ -103,21 +104,22 @@ def main(argv: list[str] | None = None) -> int:
 
 def run() -> int:
     """Startup guard. Everything above this can fail before there is a window
-    to show an error in - a missing Qt plugin on a share, an unwritable data
-    dir - and the operator would see the process vanish with no message."""
+    to show an error in - a broken Tcl/Tk unpack on a share, an unwritable
+    data dir - and the operator would see the process vanish with no
+    message."""
     try:
         return main()
     except BaseException as exc:  # noqa: BLE001 - last line before silence
         log = record_crash(exc)
         try:
-            from PySide6.QtWidgets import QApplication, QMessageBox
+            from tkinter import messagebox
 
-            if QApplication.instance() is None:
-                QApplication(sys.argv)
-            QMessageBox.critical(
-                None,
+            from dialogs.tk_base import ensure_root
+
+            ensure_root()
+            messagebox.showerror(
                 "BOM Verify could not start",
-                f"{type(exc).__name__}: {exc}\n\nDetails written to:\n{log or '(could not write a log)'}",
+                f"{type(exc).__name__}: {exc}" + chr(10) + chr(10) + "Details written to:" + chr(10) + (log or "(could not write a log)"),
             )
         except BaseException:
             print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)

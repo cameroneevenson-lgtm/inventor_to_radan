@@ -8,9 +8,9 @@ version = "1.0.0"
 description = "Convert an Inventor BOM export into a Radan import CSV"
 requires-python = ">=3.10"
 dependencies = [
-    "pandas",
+    # tkinter is stdlib; pandas and PySide6 were removed to keep the frozen
+    # exe small (they were 70 MB of it) - see README "Option C".
     "openpyxl",
-    "pyside6",
 ]
 
 [project.scripts]
