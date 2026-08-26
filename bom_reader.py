@@ -1,17 +1,30 @@
 from __future__ import annotations
 
+import csv
+import io
 import os
 import re
-
-import pandas as pd
+from dataclasses import dataclass
 
 _LENGTH_SUFFIX = re.compile(r"-\d+(?:\.\d+)?$")
 
 
+@dataclass
+class BomTable:
+    """A parsed BOM: header names and one dict per data row.
+
+    The pandas DataFrame this replaced earned its 40 MB of numpy by reading
+    the file and grouping rows - nothing here computes. Cells hold whatever
+    the file held: str from CSV, native int/float/str/None from openpyxl.
+    """
+    columns: list[str]
+    records: list[dict]
+
+
 def normalize_text(val) -> str:
-    if pd.isna(val):
+    if val is None or (isinstance(val, float) and val != val):  # None or NaN
         return ""
-    return str(val).replace("\u00a0", " ").strip()
+    return str(val).replace(" ", " ").strip()
 
 
 def first_token(desc: str) -> str:
@@ -27,8 +40,8 @@ def part_family(part: str) -> str:
     return _LENGTH_SUFFIX.sub("", p).strip()
 
 
-def find_col(df: pd.DataFrame, keys: list[str]) -> str:
-    cols = [(c, normalize_text(c).lower()) for c in df.columns]
+def find_col(bom: BomTable, keys: list[str]) -> str:
+    cols = [(c, normalize_text(c).lower()) for c in bom.columns]
     for k in keys:
         k = k.lower()
         for c, n in cols:
@@ -45,7 +58,7 @@ def find_col(df: pd.DataFrame, keys: list[str]) -> str:
             if ksq and ksq in n_sq:
                 return c
 
-    raise ValueError(f"Missing column: {keys}. Available columns: {list(df.columns)}")
+    raise ValueError(f"Missing column: {keys}. Available columns: {bom.columns}")
 
 
 def to_int(val) -> int:
@@ -58,24 +71,24 @@ def to_int(val) -> int:
         return 0
 
 
-def choose_qty_col(df: pd.DataFrame) -> str:
+def choose_qty_col(bom: BomTable) -> str:
     """
     Choose the best Qty/Quantity column by content (most numeric).
     Prevents silent 'qty=0' when a similarly-named non-numeric column is selected.
     """
     candidates: list[str] = []
-    for c in df.columns:
+    for c in bom.columns:
         n = normalize_text(c).lower()
         if any(k in n for k in ["qty", "quantity", "q'ty", "q ty"]):
             candidates.append(c)
     if not candidates:
-        candidates = list(df.columns)
+        candidates = list(bom.columns)
 
     def numeric_rate(col: str) -> float:
-        s = df[col].apply(normalize_text)
         ok = 0
         total = 0
-        for v in s.tolist():
+        for record in bom.records:
+            v = normalize_text(record.get(col))
             if not v:
                 continue
             total += 1
@@ -99,20 +112,27 @@ def choose_qty_col(df: pd.DataFrame) -> str:
     return best_col
 
 
-def _trim_raw_bom(raw: pd.DataFrame) -> pd.DataFrame:
-    raw = raw.dropna(axis=0, how="all").dropna(axis=1, how="all")
-    if raw.shape[0] == 0 or raw.shape[1] == 0:
+# A grid is the raw sheet: list of rows, each a list of cells, padded rectangular.
+
+def _trim_raw_bom(grid: list[list]) -> list[list]:
+    grid = [row for row in grid if any(normalize_text(v) for v in row)]
+    if not grid:
         raise ValueError("BOM appears empty after removing blank rows/columns.")
-    return raw
+    width = max(len(row) for row in grid)
+    grid = [row + [None] * (width - len(row)) for row in grid]
+    keep = [j for j in range(width) if any(normalize_text(row[j]) for row in grid)]
+    if not keep:
+        raise ValueError("BOM appears empty after removing blank rows/columns.")
+    return [[row[j] for j in keep] for row in grid]
 
 
-def _detect_header_row(raw: pd.DataFrame) -> tuple[int | None, int]:
+def _detect_header_row(grid: list[list]) -> tuple[int | None, int]:
     header_keywords = ["part", "description", "desc", "qty", "quantity", "material"]
     best_row = None
     best_score = -1
 
-    for i in range(min(50, len(raw))):
-        row_vals = [normalize_text(v).lower() for v in raw.iloc[i].tolist()]
+    for i in range(min(50, len(grid))):
+        row_vals = [normalize_text(v).lower() for v in grid[i]]
         score = 0
         for kw in header_keywords:
             if any(kw in cell for cell in row_vals):
@@ -127,65 +147,85 @@ def _detect_header_row(raw: pd.DataFrame) -> tuple[int | None, int]:
     return best_row, best_score
 
 
-def _finalize_bom_frame(raw: pd.DataFrame, source_label: str) -> pd.DataFrame:
-    raw = _trim_raw_bom(raw)
-    best_row, best_score = _detect_header_row(raw)
+def _finalize_bom_table(grid: list[list], source_label: str) -> BomTable:
+    grid = _trim_raw_bom(grid)
+    best_row, best_score = _detect_header_row(grid)
 
     if best_row is None or best_score < 2:
-        preview = raw.head(10).to_string(index=False, header=False)
+        preview = "\n".join(
+            " ".join(normalize_text(v) for v in row) for row in grid[:10]
+        )
         raise ValueError(
             f"Could not confidently locate the header row in {source_label}.\n"
             "Expected columns like Part/Description/Qty.\n\n"
             f"Top of file preview:\n{preview}"
         )
 
-    header = [normalize_text(v) for v in raw.iloc[best_row].tolist()]
-    df = raw.iloc[best_row + 1:].copy()
-    df.columns = header
+    header = [normalize_text(v) for v in grid[best_row]]
+    keep = [j for j, name in enumerate(header) if name]
+    columns = [header[j] for j in keep]
 
-    df = df.loc[:, [c for c in df.columns if normalize_text(c) != ""]]
-    df = df.dropna(axis=0, how="all")
-    return df
+    records: list[dict] = []
+    for row in grid[best_row + 1:]:
+        if not any(normalize_text(row[j]) for j in keep):
+            continue
+        records.append({columns[i]: row[j] for i, j in enumerate(keep)})
+    return BomTable(columns=columns, records=records)
 
 
-def read_bom(path: str, *, supported_extensions: set[str]) -> pd.DataFrame:
+def _read_csv_grid(path: str) -> list[list]:
+    # utf-8-sig eats a BOM marker if present; production exports have also
+    # arrived as cp1252, which pandas' python engine used to shrug off.
+    for encoding in ("utf-8-sig", "cp1252"):
+        try:
+            with io.open(path, newline="", encoding=encoding) as f:
+                return [row for row in csv.reader(f)]
+        except UnicodeDecodeError:
+            continue
+    raise ValueError(f"Could not decode {os.path.basename(path)} as utf-8 or cp1252.")
+
+
+def read_bom(path: str, *, supported_extensions: set[str]) -> BomTable:
     ext = os.path.splitext(path)[1].lower()
 
     if ext == ".csv":
-        raw = pd.read_csv(path, header=None, engine="python")
-        return _finalize_bom_frame(raw, os.path.basename(path))
+        return _finalize_bom_table(_read_csv_grid(path), os.path.basename(path))
 
     if ext == ".xlsx":
         try:
-            sheets = pd.read_excel(path, header=None, sheet_name=None, engine="openpyxl")
+            import openpyxl
         except ImportError as exc:
             raise RuntimeError(
                 "Reading .xlsx BOMs requires openpyxl.\n"
                 "Run: python -m pip install openpyxl"
             ) from exc
 
-        best_candidate = None
+        workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        try:
+            best_candidate = None
+            for sheet in workbook.worksheets:
+                grid = [list(row) for row in sheet.iter_rows(values_only=True)]
+                try:
+                    trimmed = _trim_raw_bom(grid)
+                except ValueError:
+                    continue
 
-        for sheet_name, raw in sheets.items():
-            try:
-                trimmed = _trim_raw_bom(raw)
-            except ValueError:
-                continue
-
-            best_row, best_score = _detect_header_row(trimmed)
-            candidate = {
-                "sheet_name": sheet_name,
-                "raw": trimmed,
-                "best_score": best_score,
-            }
-            if best_candidate is None or candidate["best_score"] > best_candidate["best_score"]:
-                best_candidate = candidate
+                best_row, best_score = _detect_header_row(trimmed)
+                candidate = {
+                    "sheet_name": sheet.title,
+                    "grid": trimmed,
+                    "best_score": best_score,
+                }
+                if best_candidate is None or candidate["best_score"] > best_candidate["best_score"]:
+                    best_candidate = candidate
+        finally:
+            workbook.close()
 
         if best_candidate is None:
             raise ValueError("Workbook appears empty across all sheets.")
 
-        return _finalize_bom_frame(
-            best_candidate["raw"],
+        return _finalize_bom_table(
+            best_candidate["grid"],
             f"{os.path.basename(path)} [{best_candidate['sheet_name']}]",
         )
 

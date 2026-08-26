@@ -1,3 +1,4 @@
+import csv
 import os
 import sys
 from dataclasses import dataclass
@@ -38,11 +39,6 @@ def _missing(package: str, install: str, cause: ImportError):
 
 
 try:
-    import pandas as pd
-except ImportError as exc:
-    _missing("pandas", "pandas", exc)
-
-try:
     from PySide6.QtWidgets import (
         QApplication, QDialog, QMessageBox
     )
@@ -50,6 +46,7 @@ except ImportError as exc:
     _missing("PySide6", "pyside6", exc)
 
 from bom_reader import (
+    BomTable,
     choose_qty_col,
     find_col,
     first_token,
@@ -154,7 +151,7 @@ def append_rule(desc: str, mat: str, thk: str, strat: str) -> None:
 # Robust BOM reading (handles shifted right/down)
 # ============================================================
 
-def read_bom(path: str) -> pd.DataFrame:
+def read_bom(path: str) -> BomTable:
     return _read_bom(path, supported_extensions=SUPPORTED_BOM_EXTENSIONS)
 
 # ============================================================
@@ -186,7 +183,7 @@ class RadanRuleDialog(_RadanRuleDialog):
 # ============================================================
 
 def compute_expected_missing_dxfs(
-    df: pd.DataFrame, extra_expected: set[str] | None = None
+    rows: list[dict], extra_expected: set[str] | None = None
 ) -> list[str]:
     """
     For rows with no DXF, expected missing = full Description in column A of
@@ -204,8 +201,9 @@ def compute_expected_missing_dxfs(
     stock_cut_families = _stock_cut_families()
 
     missing: list[str] = []
-    nodxf = df[~df["_HasDxf"]]
-    for _, r in nodxf.iterrows():
+    for r in rows:
+        if r["_HasDxf"]:
+            continue
         part = r["_Part"]
         desc = r["_Desc"]
         tok = first_token(desc).lower()
@@ -224,7 +222,7 @@ def compute_expected_missing_dxfs(
 def _stock_cut_families() -> set[str]:
     return {f.lower() for f in load_set(STOCK_CUT_PARTS_CSV, "PartFamily") if f}
 
-def compute_stock_cut_parts(df: pd.DataFrame) -> list[str]:
+def compute_stock_cut_parts(rows: list[dict]) -> list[str]:
     """
     Parts with no DXF whose family is listed in stock_cut_parts.csv - cut to
     length from stock rather than nested, so a per-length DXF is never drawn.
@@ -235,22 +233,24 @@ def compute_stock_cut_parts(df: pd.DataFrame) -> list[str]:
     """
     stock_cut_families = _stock_cut_families()
     out: list[str] = []
-    nodxf = df[~df["_HasDxf"]]
-    for _, r in nodxf.iterrows():
+    for r in rows:
+        if r["_HasDxf"]:
+            continue
         part = r["_Part"]
         if part and part_family(part).lower() in stock_cut_families:
             out.append(part)
     return sorted(set(out))
 
-def compute_nonlaser_parts(df: pd.DataFrame) -> list[str]:
+def compute_nonlaser_parts(rows: list[dict]) -> list[str]:
     """
     Non-laser parts (no DXF) based on FIRST TOKEN match to nonlaser_tokens.csv.
     Returns sorted unique list of PartNumbers.
     """
     nonlaser_tokens = {t.lower() for t in load_set(NONLASER_TOKENS_CSV, "Token")}
     out: list[str] = []
-    nodxf = df[~df["_HasDxf"]]
-    for _, r in nodxf.iterrows():
+    for r in rows:
+        if r["_HasDxf"]:
+            continue
         part = r["_Part"]
         tok = first_token(r["_Desc"]).lower()
         if part and tok and tok in nonlaser_tokens:
@@ -270,21 +270,16 @@ def ensure_config_csvs() -> None:
     ensure_csv(STOCK_CUT_PARTS_CSV, ["PartFamily"])
 
 
-def prepare_bom_dataframe(bom_path: str) -> tuple[pd.DataFrame, str]:
+def prepare_bom_rows(bom_path: str) -> tuple[list[dict], str]:
     base_dir = os.path.dirname(bom_path)
 
     # ---- Read BOM robustly
-    df = read_bom(bom_path)
+    bom = read_bom(bom_path)
 
     # ---- Identify key columns
-    part_col = find_col(df, ["part number", "part #", "part", "pn"])
-    desc_col = find_col(df, ["description", "desc"])
-    qty_col = choose_qty_col(df)
-
-    # ---- Normalize fields
-    df["_Part"] = df[part_col].apply(normalize_text)
-    df["_Desc"] = df[desc_col].apply(normalize_text)
-    df["_Qty"]  = df[qty_col].apply(to_int)
+    part_col = find_col(bom, ["part number", "part #", "part", "pn"])
+    desc_col = find_col(bom, ["description", "desc"])
+    qty_col = choose_qty_col(bom)
 
     # ---- DXF existence (BOM folder)
     def has_dxf(part: str) -> bool:
@@ -292,22 +287,36 @@ def prepare_bom_dataframe(bom_path: str) -> tuple[pd.DataFrame, str]:
             return False
         return os.path.exists(os.path.join(base_dir, f"{part}.dxf"))
 
-    df["_HasDxf"] = df["_Part"].apply(has_dxf)
-    return df, base_dir
+    # ---- Normalized working rows; downstream reads only these four keys
+    rows: list[dict] = []
+    for record in bom.records:
+        part = normalize_text(record.get(part_col))
+        rows.append({
+            "_Part": part,
+            "_Desc": normalize_text(record.get(desc_col)),
+            "_Qty": to_int(record.get(qty_col)),
+            "_HasDxf": has_dxf(part),
+        })
+    return rows, base_dir
 
 
-def collect_missing_dxf_prompt_items(df: pd.DataFrame) -> list[dict]:
-    missing_df = df[~df["_HasDxf"]].copy()
+def collect_missing_dxf_prompt_items(rows: list[dict]) -> list[dict]:
     prompt_items: list[dict] = []
+    # Group missing-DXF rows by description. Iterated in sorted order because
+    # that is the order the classify dialog has always shown them in (the
+    # pandas groupby this replaced sorted its group keys).
+    counts: dict[str, int] = {}
+    for r in rows:
+        if not r["_HasDxf"]:
+            counts[r["_Desc"]] = counts.get(r["_Desc"], 0) + 1
 
-    if len(missing_df) > 0:
-        grouped = missing_df.groupby("_Desc", dropna=False)
-
+    if counts:
         expected_desc = set(load_rules())
         nonlaser_tokens = load_set(NONLASER_TOKENS_CSV, "Token")
         nonlaser_tokens_l = {t.lower() for t in nonlaser_tokens}
 
-        for desc, g in grouped:
+        for desc in sorted(counts):
+            count = counts[desc]
             desc = normalize_text(desc)
             if not desc:
                 continue
@@ -322,7 +331,7 @@ def collect_missing_dxf_prompt_items(df: pd.DataFrame) -> list[dict]:
             prompt_items.append({
                 "desc": desc,
                 "token": first_token(desc),
-                "count": int(len(g)),
+                "count": count,
             })
 
     seen: set[str] = set()
@@ -336,8 +345,8 @@ def collect_missing_dxf_prompt_items(df: pd.DataFrame) -> list[dict]:
     return prompt_unique
 
 
-def collect_missing_rules(df: pd.DataFrame, rules: dict[str, dict]) -> list[str]:
-    laser_descs = sorted(set(df.loc[df["_HasDxf"], "_Desc"].tolist()))
+def collect_missing_rules(rows: list[dict], rules: dict[str, dict]) -> list[str]:
+    laser_descs = sorted({r["_Desc"] for r in rows if r["_HasDxf"]})
     return [d for d in laser_descs if d and d not in rules]
 
 
@@ -345,17 +354,17 @@ def write_radan_outputs(
     *,
     bom_path: str,
     base_dir: str,
-    df: pd.DataFrame,
+    rows: list[dict],
     rules: dict[str, dict],
     ftq_parts: set[str],
     write_csv: bool = True,
     unresolved_descriptions: tuple[str, ...] = (),
     extra_expected_descs: set[str] | None = None,
 ) -> InventorToRadanResult:
-    rows: list[dict] = []
+    export_rows: list[dict] = []
     bom_dxfs: set[str] = set()
 
-    for _, r in df.iterrows():
+    for r in rows:
         part = r["_Part"]
         desc = r["_Desc"]
 
@@ -374,7 +383,7 @@ def write_radan_outputs(
         rule = rules[desc]
         material_out = "Aluminum 3003 CHK FTQ" if part in ftq_parts else rule.get("Material", "")
 
-        rows.append({
+        export_rows.append({
             "FILE": os.path.join(base_dir, f"{part}.dxf"),
             "QTY": qty,
             "MATERIAL": material_out,
@@ -388,23 +397,24 @@ def write_radan_outputs(
         os.path.splitext(os.path.basename(bom_path))[0] + RADAN_OUTPUT_SUFFIX
     )
 
-    out_df = pd.DataFrame(rows)
+    # Aggregate duplicate parts, summing QTY. Emitted sorted by the grouping
+    # key - the pandas groupby this replaced sorted its keys, and the output
+    # row order is part of what RADAN operators are used to seeing.
+    grouped_qty: dict[tuple, int] = {}
+    for row in export_rows:
+        key = (row["FILE"], row["MATERIAL"], row["THICKNESS"], row["UNIT"], row["STRATEGY"])
+        grouped_qty[key] = grouped_qty.get(key, 0) + row["QTY"]
 
-    # Optional: aggregate duplicates, BUT KEEP COLUMN ORDER FIXED
-    if not out_df.empty:
-        out_df = out_df.groupby(
-            ["FILE", "MATERIAL", "THICKNESS", "UNIT", "STRATEGY"],
-            as_index=False
-        )["QTY"].sum()
-
-        # Force required output order (groupby can reorder)
-        out_df = out_df.reindex(columns=RADAN_COL_ORDER)
-    else:
-        # Still write a header-only CSV in the correct order
-        out_df = pd.DataFrame(columns=RADAN_COL_ORDER)
+    out_rows = [
+        {"FILE": k[0], "QTY": qty, "MATERIAL": k[1], "THICKNESS": k[2], "UNIT": k[3], "STRATEGY": k[4]}
+        for k, qty in sorted(grouped_qty.items())
+    ]
 
     if write_csv:
-        out_df.to_csv(out_path, index=False, header=False, columns=RADAN_COL_ORDER)
+        with open(out_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f, lineterminator="\r\n")
+            for row in out_rows:
+                writer.writerow([row[col] for col in RADAN_COL_ORDER])
     else:
         # Verification only: the accountability checks and the report still run,
         # but the RADAN import CSV is the laser programmer's artifact and is not
@@ -425,9 +435,9 @@ def write_radan_outputs(
         if not os.path.exists(os.path.join(base_dir, os.path.splitext(f)[0] + ".pdf"))
     }
 
-    expected_missing_dxfs = compute_expected_missing_dxfs(df, extra_expected_descs)
-    nonlaser_parts = compute_nonlaser_parts(df)
-    stock_cut_parts = compute_stock_cut_parts(df)
+    expected_missing_dxfs = compute_expected_missing_dxfs(rows, extra_expected_descs)
+    nonlaser_parts = compute_nonlaser_parts(rows)
+    stock_cut_parts = compute_stock_cut_parts(rows)
 
     report_path = os.path.join(
         base_dir,
@@ -437,7 +447,7 @@ def write_radan_outputs(
         report_path=report_path,
         bom_path=bom_path,
         out_path=out_path,
-        added_count=len(out_df),
+        added_count=len(out_rows),
         expected_missing_dxfs=expected_missing_dxfs,
         orphan_dxfs=orphan_dxfs,
         missing_pdfs=missing_pdfs,
@@ -450,7 +460,7 @@ def write_radan_outputs(
         bom_path=bom_path,
         out_path=out_path,
         report_path=report_path,
-        added_count=len(out_df),
+        added_count=len(out_rows),
         expected_missing_dxfs=tuple(expected_missing_dxfs),
         orphan_dxfs=tuple(sorted(orphan_dxfs)),
         missing_pdfs=tuple(sorted(missing_pdfs)),
@@ -480,7 +490,7 @@ def convert_bom_to_radan_csv(
     collect_radan_rules: bool = True,
 ) -> InventorToRadanResult:
     ensure_config_csvs()
-    df, base_dir = prepare_bom_dataframe(bom_path)
+    rows, base_dir = prepare_bom_rows(bom_path)
 
     # ---- Persistence (disk)
     ftq_parts = load_set(FTQ_CSV, "PartNumber")
@@ -490,7 +500,7 @@ def convert_bom_to_radan_csv(
     # ============================================================
 
     expected_missing_rules: list[str] = []
-    prompt_unique = collect_missing_dxf_prompt_items(df)
+    prompt_unique = collect_missing_dxf_prompt_items(rows)
     if prompt_unique:
         if not allow_prompts:
             raise InventorToRadanNeedsUi(missing_dxf_items=prompt_unique)
@@ -504,8 +514,8 @@ def convert_bom_to_radan_csv(
     # ============================================================
 
     rules = load_rules()
-    ftq_descs = set(df.loc[df["_Part"].isin(ftq_parts), "_Desc"].tolist())
-    missing_rules = sorted(set(collect_missing_rules(df, rules)) | set(expected_missing_rules))
+    ftq_descs = {r["_Desc"] for r in rows if r["_Part"] in ftq_parts}
+    missing_rules = sorted(set(collect_missing_rules(rows, rules)) | set(expected_missing_rules))
 
     unresolved_descriptions: tuple[str, ...] = ()
     if missing_rules:
@@ -528,7 +538,7 @@ def convert_bom_to_radan_csv(
     result = write_radan_outputs(
         bom_path=bom_path,
         base_dir=base_dir,
-        df=df,
+        rows=rows,
         rules=rules,
         ftq_parts=ftq_parts,
         write_csv=write_csv,
