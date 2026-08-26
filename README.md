@@ -147,6 +147,12 @@ from copies frozen into the bundle by the checkout that built it. So a fresh cop
 with the shop's catalog as of build time and grows from there, and an exe put on a share
 works as one shared installation: everyone running it reads and writes the same tables.
 
+**Updating a deployed copy: send the exe, not the folder.** Once people have been using it,
+the four CSVs beside the exe are the live tables, holding every classification made since it
+was deployed. Copying a freshly built folder over the top replaces them with the build-time
+snapshot and throws that away. Replace `BOM Verify.exe` alone and leave the CSVs where they
+are; they are forward-compatible, and anything genuinely new reseeds only if missing.
+
 If the location is read-only the tool falls back to `%LOCALAPPDATA%\inventor_to_radan`,
 because it still has to be able to learn a rule. `INVENTOR_TO_RADAN_DATA_DIR` overrides
 both.

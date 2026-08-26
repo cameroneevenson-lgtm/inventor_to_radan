@@ -11,6 +11,10 @@ REM matplotlib, PIL and cryptography. A venv of this project's own is the
 REM difference between a 235 MB build and a 50 MB one, and it does not grow
 REM every time somebody installs something into C:\Tools\.venv.
 
+REM Do not delete dist\ before building. Once the exe has been deployed the CSVs
+REM beside it are the live rule tables; PyInstaller only replaces the exe and
+REM leaves them alone, which is the behaviour to keep.
+
 set "ROOT=%~dp0"
 set "VENV=%ROOT%.buildvenv"
 set "PY=%VENV%\Scripts\python.exe"
