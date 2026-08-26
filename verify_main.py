@@ -79,16 +79,19 @@ def main(argv: list[str] | None = None) -> int:
         verify_one(args[0])
         return 0
 
+    scan_settings = {
+        "root": config.BOM_SEARCH_ROOT,
+        "radan_suffix": config.RADAN_OUTPUT_SUFFIX,
+        # The rule tables live beside the exe, so an exe on the share puts them
+        # inside the search root as four .csv files that are not BOMs.
+        "exclude_names": config.CONFIG_CSV_NAMES,
+        "max_depth": config.BOM_SEARCH_DEPTH,
+        "limit": config.BOM_SHORTLIST_LIMIT,
+    }
+
     message = ""
     while True:
-        bom_path = pick_bom(
-            config.DATA_DIR,
-            config.BOM_SEARCH_ROOT,
-            config.RADAN_OUTPUT_SUFFIX,
-            config.BOM_SEARCH_DEPTH,
-            config.BOM_SHORTLIST_LIMIT,
-            message,
-        )
+        bom_path = pick_bom(config.DATA_DIR, scan_settings, message)
         if not bom_path:
             return 0
         message = verify_one(bom_path)

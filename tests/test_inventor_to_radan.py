@@ -496,6 +496,28 @@ class BomShortlistTests(unittest.TestCase):
         self.assertEqual(bom_finder.find_recent_boms(r"Z:\nope\not\here"), [])
         self.assertEqual(bom_finder.find_recent_boms(""), [])
 
+    def test_the_apps_own_rule_tables_are_not_offered_as_boms(self) -> None:
+        """The four tables sit beside the exe, so an exe on the share puts them
+        inside the search root. They are .csv files and emphatically not BOMs.
+
+        Driven off config.CONFIG_CSV_NAMES, the same tuple the app seeds from,
+        so a fifth table cannot be added without this exclusion following it.
+        """
+        import config
+
+        for name in config.CONFIG_CSV_NAMES:
+            self.make(f"dist/{name}")
+        self.make("dist/F59822-BOM.xlsx")
+
+        names = [Path(p).name for p in self.find(exclude_names=config.CONFIG_CSV_NAMES)]
+        self.assertEqual(names, ["F59822-BOM.xlsx"])
+
+    def test_exclusion_ignores_case(self) -> None:
+        self.make("job/DESCRIPTION_RULES.CSV")
+        self.make("job/real-BOM.xlsx")
+        names = [Path(p).name for p in self.find(exclude_names=("description_rules.csv",))]
+        self.assertEqual(names, ["real-BOM.xlsx"])
+
     def test_only_spreadsheets(self) -> None:
         self.make("job/real-BOM.xlsx")
         self.make("job/notes.txt")

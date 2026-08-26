@@ -34,21 +34,13 @@ class _ScanThread(QThread):
 
     finished_scan = Signal(list)
 
-    def __init__(self, root: str, radan_suffix: str, depth: int, limit: int, parent=None):
+    def __init__(self, scan: dict, parent=None):
         super().__init__(parent)
-        self._root = root
-        self._radan_suffix = radan_suffix
-        self._depth = depth
-        self._limit = limit
+        self._scan = dict(scan)
 
     def run(self) -> None:
         try:
-            hits = find_recent_boms(
-                self._root,
-                radan_suffix=self._radan_suffix,
-                max_depth=self._depth,
-                limit=self._limit,
-            )
+            hits = find_recent_boms(**self._scan)
         except Exception:
             hits = []
         self.finished_scan.emit(hits)
@@ -63,15 +55,12 @@ class BomPickerDialog(QDialog):
     the share, and navigating to it by hand is the slow part.
     """
 
-    def __init__(self, data_dir: str, search_root: str, radan_suffix: str,
-                 depth: int, limit: int, parent=None):
+    def __init__(self, data_dir: str, scan: dict, parent=None):
         super().__init__(parent)
         self.selected_path: str | None = None
+        self._scan_settings = dict(scan)
         self._scan: _ScanThread | None = None
-        self._search_root = search_root
-        self._radan_suffix = radan_suffix
-        self._depth = depth
-        self._limit = limit
+        self._search_root = self._scan_settings.get("root", "")
 
         self.setWindowTitle("Verify Inventor BOM")
         self.setMinimumWidth(560)
@@ -135,9 +124,7 @@ class BomPickerDialog(QDialog):
 
         self.list_label.setText(f"Recent BOMs in {self._search_root} - scanning...")
         self.refresh_button.setEnabled(False)
-        self._scan = _ScanThread(
-            self._search_root, self._radan_suffix, self._depth, self._limit, self
-        )
+        self._scan = _ScanThread(self._scan_settings, self)
         self._scan.finished_scan.connect(self._scan_done)
         self._scan.start()
 
@@ -194,10 +181,13 @@ class BomPickerDialog(QDialog):
         self.accept()
 
 
-def pick_bom(data_dir: str, search_root: str, radan_suffix: str,
-             depth: int, limit: int, last_message: str = "") -> str | None:
-    """Show the picker and return the chosen BOM, or None if they closed it."""
-    dialog = BomPickerDialog(data_dir, search_root, radan_suffix, depth, limit)
+def pick_bom(data_dir: str, scan: dict, last_message: str = "") -> str | None:
+    """Show the picker and return the chosen BOM, or None if they closed it.
+
+    `scan` is passed straight to `bom_finder.find_recent_boms`, so settings can
+    be added there without threading another argument through this call.
+    """
+    dialog = BomPickerDialog(data_dir, scan)
     if last_message:
         dialog.status.setText(last_message)
     if dialog.exec() != QDialog.Accepted:

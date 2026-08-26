@@ -9,7 +9,12 @@ from __future__ import annotations
 import os
 
 
-def _is_candidate(name: str, extensions: tuple[str, ...], radan_suffix: str) -> bool:
+def _is_candidate(
+    name: str,
+    extensions: tuple[str, ...],
+    radan_suffix: str,
+    exclude_names: tuple[str, ...],
+) -> bool:
     lowered = name.lower()
     if lowered.startswith("~$"):
         # Excel's lock file for an open workbook, not something to convert.
@@ -17,6 +22,11 @@ def _is_candidate(name: str, extensions: tuple[str, ...], radan_suffix: str) -> 
     if lowered.endswith(radan_suffix.lower()):
         # This tool's own output lands beside the BOM it came from. Offering it
         # back as an input is how someone converts a converted file.
+        return False
+    if lowered in {n.lower() for n in exclude_names}:
+        # The app's own rule tables. They sit beside the exe, so putting the exe
+        # on the share puts them inside the search root, where they are four
+        # .csv files that are emphatically not BOMs.
         return False
     return lowered.endswith(extensions)
 
@@ -26,6 +36,7 @@ def find_recent_boms(
     *,
     extensions: tuple[str, ...] = (".csv", ".xlsx"),
     radan_suffix: str = "_Radan.csv",
+    exclude_names: tuple[str, ...] = (),
     max_depth: int = 2,
     limit: int = 15,
 ) -> list[tuple[str, float]]:
@@ -47,7 +58,7 @@ def find_recent_boms(
                         if entry.is_dir(follow_symlinks=False):
                             if depth < max_depth:
                                 walk(entry.path, depth + 1)
-                        elif _is_candidate(entry.name, extensions, radan_suffix):
+                        elif _is_candidate(entry.name, extensions, radan_suffix, exclude_names):
                             found.append((entry.path, entry.stat().st_mtime))
                     except OSError:
                         continue
