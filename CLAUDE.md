@@ -111,6 +111,12 @@ The build runs from `.buildvenv`, never `C:\Tools\.venv`: PyInstaller bundles wh
 venv holds, and the shared one made a 50 MB app into a 235 MB folder. Its spec is committed
 because `--exclude-module` cannot drop individual Qt DLLs.
 
+**The picker's shortlist must never offer a `*_Radan.csv`.** `bom_finder.py` scans the
+laser share for recent BOMs, and this tool's own output lands in the same folders as its
+input - listing one is how somebody converts a converted file. The scan is depth-bounded
+(jobs sit two levels under the root) and runs on a `QThread`: it is a network drive, and a
+share that is slow or unmapped would otherwise freeze the window before it ever appeared.
+
 ## Branching
 
 All work happens on `main`. Do not create branches for agent work - commit and push straight to `main`. If an agent branch does turn up, fold it into `main`, prune it locally and on the remote, then push.

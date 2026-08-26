@@ -81,7 +81,14 @@ def main(argv: list[str] | None = None) -> int:
 
     message = ""
     while True:
-        bom_path = pick_bom(config.DATA_DIR, message)
+        bom_path = pick_bom(
+            config.DATA_DIR,
+            config.BOM_SEARCH_ROOT,
+            config.RADAN_OUTPUT_SUFFIX,
+            config.BOM_SEARCH_DEPTH,
+            config.BOM_SHORTLIST_LIMIT,
+            message,
+        )
         if not bom_path:
             return 0
         message = verify_one(bom_path)

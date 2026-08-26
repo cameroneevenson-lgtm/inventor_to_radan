@@ -36,6 +36,8 @@ Convert an Inventor BOM (`.csv` or `.xlsx`) into a Radan import CSV, with DXF ac
 - `BOM Verify.spec` - the build's binary/data filtering and onefile config; committed because
   `--exclude-module` cannot drop individual Qt DLLs
 - `dialogs/bom_picker_dialog.py` - the exe's **Select BOM...** front door
+- `bom_finder.py` - the picker's shortlist: a depth-bounded scan of the laser share for
+  recently touched BOMs
 - `dialogs/` - `missing_dxf_dialog.py`, `radan_rule_dialog.py`, `report_review_dialog.py`
 - `inventor_to_radan.bat` - launcher script
 - `description_rules.csv` - per-description Radan rule table
@@ -118,6 +120,18 @@ Launched from a shortcut it opens a picker with a **Select BOM...** button and s
 afterwards, because fix-and-recheck is the normal loop. A BOM dropped on the exe is checked
 once. Being a onefile build it unpacks to temp on every launch, so expect 5-15 s before the
 first window appears.
+
+On launch it lists the most recently touched BOMs on the laser share, newest first, so the
+usual answer is one double-click away; **Select BOM...** still browses anywhere, and
+**Refresh** re-scans. The scan runs off the UI thread and its result is reused for the rest
+of the session, so reopening the picker after a run is instant. `*_Radan.csv` files are
+excluded - the tool writes those next to the BOM they came from, and offering one back as
+an input is how somebody converts a converted file.
+
+The search root defaults to `W:\LASER` (jobs sit two levels down, under
+`For Battleshield Fabrication\` and `PSD\`). `INVENTOR_TO_RADAN_BOM_ROOT` overrides it;
+set it to an empty string to turn the shortlist off. If the drive is not mapped the list is
+simply empty and the buttons still work.
 
 The four rule CSVs sit **beside the exe**, not in a per-user folder, seeded on first run
 from copies frozen into the bundle by the checkout that built it. So a fresh copy starts

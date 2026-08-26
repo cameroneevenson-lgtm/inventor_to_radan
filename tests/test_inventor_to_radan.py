@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import csv
 import importlib.util
+import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -13,6 +15,7 @@ if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
 
 import bom_converter
+import bom_finder
 import inline_runner
 import rule_store
 
@@ -428,6 +431,76 @@ class VerificationOnlyTests(unittest.TestCase):
         result = self.convert()
         self.assertTrue((self.temp_dir / "kit-bom_Radan.csv").exists())
         self.assertEqual(result.out_path, str(self.temp_dir / "kit-bom_Radan.csv"))
+
+
+class BomShortlistTests(unittest.TestCase):
+    """The picker offers the last few BOMs off the share, because the answer is
+    nearly always one of them and navigating there by hand is the slow part.
+    """
+
+    def setUp(self) -> None:
+        self._temp_context = tempfile.TemporaryDirectory(prefix="inventor_to_radan_find_")
+        self.root = Path(self._temp_context.name)
+
+    def tearDown(self) -> None:
+        self._temp_context.cleanup()
+
+    def make(self, relative: str, age_days: float = 0.0) -> Path:
+        path = self.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x", encoding="utf-8")
+        stamp = time.time() - age_days * 86400
+        os.utime(path, (stamp, stamp))
+        return path
+
+    def find(self, **kwargs):
+        return [p for p, _ in bom_finder.find_recent_boms(str(self.root), **kwargs)]
+
+    def test_newest_first(self) -> None:
+        self.make("job/old-BOM.xlsx", age_days=30)
+        self.make("job/new-BOM.xlsx", age_days=1)
+        self.make("job/middle-BOM.xlsx", age_days=10)
+        self.assertEqual(
+            [Path(p).name for p in self.find()],
+            ["new-BOM.xlsx", "middle-BOM.xlsx", "old-BOM.xlsx"],
+        )
+
+    def test_the_tools_own_output_is_not_offered_back_as_input(self) -> None:
+        """*_Radan.csv lands beside the BOM it came from. Listing it is how
+        somebody converts a converted file."""
+        self.make("job/F59822-BOM.xlsx")
+        self.make("job/F59822-BOM_Radan.csv")
+        self.assertEqual([Path(p).name for p in self.find()], ["F59822-BOM.xlsx"])
+
+    def test_excel_lock_files_are_skipped(self) -> None:
+        self.make("job/kit-BOM.xlsx")
+        self.make("job/~$kit-BOM.xlsx")
+        self.assertEqual([Path(p).name for p in self.find()], ["kit-BOM.xlsx"])
+
+    def test_depth_is_bounded(self) -> None:
+        """The share is deep and mostly not BOMs; an unbounded walk is the
+        difference between a second and a minute."""
+        self.make("a/BOM.xlsx")
+        self.make("a/b/c/d/deep-BOM.xlsx")
+        names = [Path(p).name for p in self.find(max_depth=1)]
+        self.assertIn("BOM.xlsx", names)
+        self.assertNotIn("deep-BOM.xlsx", names)
+
+    def test_limit_is_honoured(self) -> None:
+        for i in range(8):
+            self.make(f"job/bom{i}-BOM.xlsx", age_days=i)
+        self.assertEqual(len(self.find(limit=3)), 3)
+
+    def test_an_unmapped_drive_returns_nothing_rather_than_raising(self) -> None:
+        """W: is not always mapped. The picker still has to open."""
+        self.assertEqual(bom_finder.find_recent_boms(r"Z:\nope\not\here"), [])
+        self.assertEqual(bom_finder.find_recent_boms(""), [])
+
+    def test_only_spreadsheets(self) -> None:
+        self.make("job/real-BOM.xlsx")
+        self.make("job/notes.txt")
+        self.make("job/drawing.dxf")
+        self.assertEqual([Path(p).name for p in self.find()], ["real-BOM.xlsx"])
 
 
 if __name__ == "__main__":

@@ -99,6 +99,13 @@ CONFIG_CSV_NAMES = (
     "stock_cut_parts.csv",
 )
 
+# Where the picker looks for recently-touched BOMs to offer as a shortlist.
+# Jobs live two levels down, under "For Battleshield Fabrication" and "PSD".
+# Empty string disables the shortlist; the Select BOM... button is unaffected.
+BOM_SEARCH_ROOT = os.environ.get("INVENTOR_TO_RADAN_BOM_ROOT", r"W:\LASER")
+BOM_SEARCH_DEPTH = 2
+BOM_SHORTLIST_LIMIT = 15
+
 RADAN_OUTPUT_SUFFIX = "_Radan.csv"
 REPORT_SUFFIX = "_report.txt"
 SUPPORTED_BOM_EXTENSIONS = {".csv", ".xlsx"}
