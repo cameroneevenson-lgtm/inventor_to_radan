@@ -27,6 +27,9 @@ class ReportReviewDialog(QDialog):
     # fatigue that made the old single blanket checkbox worthless.
     REVIEW_SECTION_LEVELS = {
         "Expected laser but missing DXF": "red",
+        # A verification run cannot resolve these itself; somebody with the
+        # RADAN vocabulary has to add the rule before the parts can be nested.
+        "New descriptions": "yellow",
         "Orphan DXFs": "yellow",
         "DXFs missing PDFs": "yellow",
         "Non-laser parts": "green",

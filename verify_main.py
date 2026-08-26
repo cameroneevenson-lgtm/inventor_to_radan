@@ -62,7 +62,11 @@ def main(argv: list[str] | None = None) -> int:
         name = os.path.basename(bom_path)
         try:
             bom_converter.convert_bom_to_radan_csv(
-                bom_path, allow_prompts=True, show_summary=True, write_csv=False
+                bom_path,
+                allow_prompts=True,
+                show_summary=True,
+                write_csv=False,
+                collect_radan_rules=False,
             )
         except bom_converter.InventorToRadanCancelled:
             return f"{name}: cancelled."

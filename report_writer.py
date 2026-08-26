@@ -11,7 +11,8 @@ def write_report(report_path: str,
                  orphan_dxfs: set[str],
                  missing_pdfs: set[str],
                  nonlaser_parts: list[str],
-                 stock_cut_parts: list[str]) -> None:
+                 stock_cut_parts: list[str],
+                 unresolved_descriptions: list[str] | None = None) -> None:
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(f"BOM: {bom_path}\n")
         f.write(f"Folder: {os.path.dirname(bom_path)}\n")
@@ -33,6 +34,15 @@ def write_report(report_path: str,
         else:
             f.write("  (none)\n")
         f.write("\n")
+
+        if unresolved_descriptions:
+            # Only on a verification run. The normal path makes the operator
+            # supply the rule before the report is written, so there is nothing
+            # outstanding to list and an empty "(none)" section would be noise.
+            f.write("New descriptions (laser, but no RADAN rule yet):\n")
+            for name in unresolved_descriptions:
+                f.write(f"  {name}\n")
+            f.write("\n")
 
         f.write("Orphan DXFs (in folder but not referenced by BOM):\n")
         if orphan_dxfs:

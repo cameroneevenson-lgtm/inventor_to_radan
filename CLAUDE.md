@@ -59,7 +59,11 @@ not "complete" just because the CSV was written to disk.
 wrong. `description_rules.csv` column A is also the sole list of known laser
 descriptions; `nonlaser_tokens.csv` classifies known non-laser families. Choosing
 Expected Laser for an unknown missing DXF must collect a complete rule immediately —
-**never append a description-only row.**
+**never append a description-only row.** The verification build is the one exception,
+and it resolves the tension by writing *nothing*: `collect_radan_rules=False` skips the
+rule prompt and reports the descriptions under *New descriptions* instead, so no
+incomplete row is ever created. If that ever looks like it needs "just saving the
+description", it does not.
 
 **The two "no DXF is fine" lists key off different columns and are not
 interchangeable.** `nonlaser_tokens.csv` matches the first token of the

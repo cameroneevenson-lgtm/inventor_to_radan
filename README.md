@@ -133,6 +133,15 @@ The search root defaults to `W:\LASER` (jobs sit two levels down, under
 set it to an empty string to turn the shortlist off. If the drive is not mapped the list is
 simply empty and the buttons still work.
 
+**It never asks a designer for a RADAN rule.** Material, thickness and strategy are the
+laser programmer's vocabulary. When the exe meets a description it has not seen, it asks
+only the question the person in front of it can answer - is this laser or not - and lists
+anything still unresolved in the report under *New descriptions (laser, but no RADAN rule
+yet)* for somebody with that vocabulary to settle. The rule table is not written to, because
+a row with blank fields is worse than no row: column A of `description_rules.csv` is what
+marks a description as known laser. A "not laser" answer is still saved, as it is a complete
+answer on its own.
+
 The four rule CSVs sit **beside the exe**, not in a per-user folder, seeded on first run
 from copies frozen into the bundle by the checkout that built it. So a fresh copy starts
 with the shop's catalog as of build time and grows from there, and an exe put on a share

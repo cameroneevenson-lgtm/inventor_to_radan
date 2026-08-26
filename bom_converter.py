@@ -95,6 +95,9 @@ class InventorToRadanResult:
     missing_pdfs: tuple[str, ...]
     nonlaser_parts: tuple[str, ...]
     stock_cut_parts: tuple[str, ...]
+    # Descriptions a verification run saw for the first time. Empty on the
+    # normal path, where the operator is made to supply a rule there and then.
+    unresolved_descriptions: tuple[str, ...] = ()
 
 
 class InventorToRadanNeedsUi(RuntimeError):
@@ -182,14 +185,21 @@ class RadanRuleDialog(_RadanRuleDialog):
 # Core logic
 # ============================================================
 
-def compute_expected_missing_dxfs(df: pd.DataFrame) -> list[str]:
+def compute_expected_missing_dxfs(
+    df: pd.DataFrame, extra_expected: set[str] | None = None
+) -> list[str]:
     """
     For rows with no DXF, expected missing = full Description in column A of
     description_rules.csv AND NOT first token in nonlaser_tokens.csv AND NOT a
     family in stock_cut_parts.csv.
     Returns sorted unique list of "PartNumber.dxf" names.
+
+    `extra_expected` carries descriptions the operator just marked as expected
+    laser. Normally answering that writes a rule, which puts the description in
+    the table above; a verification run does not write rules, and without this
+    the answer would vanish from the very section it belongs in.
     """
-    expected_desc = set(load_rules())
+    expected_desc = set(load_rules()) | set(extra_expected or ())
     nonlaser_tokens = {t.lower() for t in load_set(NONLASER_TOKENS_CSV, "Token")}
     stock_cut_families = _stock_cut_families()
 
@@ -339,6 +349,8 @@ def write_radan_outputs(
     rules: dict[str, dict],
     ftq_parts: set[str],
     write_csv: bool = True,
+    unresolved_descriptions: tuple[str, ...] = (),
+    extra_expected_descs: set[str] | None = None,
 ) -> InventorToRadanResult:
     rows: list[dict] = []
     bom_dxfs: set[str] = set()
@@ -413,7 +425,7 @@ def write_radan_outputs(
         if not os.path.exists(os.path.join(base_dir, os.path.splitext(f)[0] + ".pdf"))
     }
 
-    expected_missing_dxfs = compute_expected_missing_dxfs(df)
+    expected_missing_dxfs = compute_expected_missing_dxfs(df, extra_expected_descs)
     nonlaser_parts = compute_nonlaser_parts(df)
     stock_cut_parts = compute_stock_cut_parts(df)
 
@@ -431,6 +443,7 @@ def write_radan_outputs(
         missing_pdfs=missing_pdfs,
         nonlaser_parts=nonlaser_parts,
         stock_cut_parts=stock_cut_parts,
+        unresolved_descriptions=list(unresolved_descriptions),
     )
 
     return InventorToRadanResult(
@@ -443,6 +456,7 @@ def write_radan_outputs(
         missing_pdfs=tuple(sorted(missing_pdfs)),
         nonlaser_parts=tuple(nonlaser_parts),
         stock_cut_parts=tuple(stock_cut_parts),
+        unresolved_descriptions=tuple(unresolved_descriptions),
     )
 
 
@@ -463,6 +477,7 @@ def convert_bom_to_radan_csv(
     allow_prompts: bool = False,
     show_summary: bool = False,
     write_csv: bool = True,
+    collect_radan_rules: bool = True,
 ) -> InventorToRadanResult:
     ensure_config_csvs()
     df, base_dir = prepare_bom_dataframe(bom_path)
@@ -492,13 +507,23 @@ def convert_bom_to_radan_csv(
     ftq_descs = set(df.loc[df["_Part"].isin(ftq_parts), "_Desc"].tolist())
     missing_rules = sorted(set(collect_missing_rules(df, rules)) | set(expected_missing_rules))
 
+    unresolved_descriptions: tuple[str, ...] = ()
     if missing_rules:
-        if not allow_prompts:
+        if not collect_radan_rules:
+            # Upstream of RADAN. Material, thickness and strategy are the laser
+            # programmer's vocabulary, and asking a designer for them gets
+            # guesses written into the shop's rule table. The run reports the
+            # descriptions instead and leaves the table alone - a rule with
+            # blank fields is worse than no rule, because column A of
+            # description_rules.csv is what marks a description as known laser.
+            unresolved_descriptions = tuple(missing_rules)
+        elif not allow_prompts:
             raise InventorToRadanNeedsUi(missing_rules=missing_rules)
-        dlg = RadanRuleDialog(missing_rules, ftq_descs)
-        if dlg.exec() != QDialog.Accepted:
-            raise InventorToRadanCancelled()
-        rules = load_rules()
+        else:
+            dlg = RadanRuleDialog(missing_rules, ftq_descs)
+            if dlg.exec() != QDialog.Accepted:
+                raise InventorToRadanCancelled()
+            rules = load_rules()
 
     result = write_radan_outputs(
         bom_path=bom_path,
@@ -507,6 +532,8 @@ def convert_bom_to_radan_csv(
         rules=rules,
         ftq_parts=ftq_parts,
         write_csv=write_csv,
+        unresolved_descriptions=unresolved_descriptions,
+        extra_expected_descs=set(expected_missing_rules),
     )
     if show_summary:
         dialog = ReportReviewDialog(result)
@@ -522,10 +549,14 @@ def convert_bom_to_radan_csv(
     return result
 
 
-def main(bom_path: str, *, write_csv: bool = True) -> int:
+def main(bom_path: str, *, write_csv: bool = True, collect_radan_rules: bool = True) -> int:
     try:
         convert_bom_to_radan_csv(
-            bom_path, allow_prompts=True, show_summary=True, write_csv=write_csv
+            bom_path,
+            allow_prompts=True,
+            show_summary=True,
+            write_csv=write_csv,
+            collect_radan_rules=collect_radan_rules,
         )
     except (InventorToRadanCancelled, InventorToRadanReportRejected):
         return 2

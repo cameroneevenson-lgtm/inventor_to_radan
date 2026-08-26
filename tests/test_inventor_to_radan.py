@@ -525,5 +525,134 @@ class BomShortlistTests(unittest.TestCase):
         self.assertEqual([Path(p).name for p in self.find()], ["real-BOM.xlsx"])
 
 
+class UpstreamPromptTests(unittest.TestCase):
+    """The verify exe goes to people upstream of RADAN. Material, thickness and
+    strategy are the laser programmer's vocabulary; asking a designer for them
+    gets guesses written into the shop's rule table. So a verification run asks
+    only the laser/not-laser question and reports what it could not resolve.
+    """
+
+    def setUp(self) -> None:
+        self._temp_context = tempfile.TemporaryDirectory(prefix="inventor_to_radan_up_")
+        self.temp_dir = Path(self._temp_context.name)
+        self.config_dir = self.temp_dir / "config"
+        self.config_dir.mkdir()
+        self.rules_csv = self.config_dir / "description_rules.csv"
+        self.rules_csv.write_text(
+            "Description,Material,Thickness,Strategy\nKNOWN PANEL,Aluminum 3003,0.125,Default\n",
+            encoding="utf-8",
+        )
+        bom = self.temp_dir / "kit-bom.csv"
+        with bom.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["Part Number", "Description", "Qty"])
+            writer.writerow(["ABC-001", "KNOWN PANEL", "2"])
+            writer.writerow(["NEW-001", "BRAND NEW MATERIAL", "3"])
+        (self.temp_dir / "ABC-001.dxf").write_text("dxf", encoding="utf-8")
+        (self.temp_dir / "NEW-001.dxf").write_text("dxf", encoding="utf-8")
+        self.bom_path = bom
+
+    def tearDown(self) -> None:
+        self._temp_context.cleanup()
+
+    def patch_config_paths(self):
+        return patch.multiple(
+            bom_converter,
+            RULES_CSV=str(self.rules_csv),
+            FTQ_CSV=str(self.config_dir / "ftq_parts.csv"),
+            NONLASER_TOKENS_CSV=str(self.config_dir / "nonlaser_tokens.csv"),
+            STOCK_CUT_PARTS_CSV=str(self.config_dir / "stock_cut_parts.csv"),
+        )
+
+    def convert(self, **kwargs):
+        with self.patch_config_paths():
+            return bom_converter.convert_bom_to_radan_csv(
+                str(self.bom_path), allow_prompts=True, show_summary=False, **kwargs
+            )
+
+    def test_a_new_description_is_reported_not_prompted_for(self) -> None:
+        def explode(*args, **kwargs):
+            raise AssertionError("a designer must never be asked for a RADAN rule")
+
+        with patch.object(bom_converter, "RadanRuleDialog", explode):
+            result = self.convert(write_csv=False, collect_radan_rules=False)
+
+        self.assertEqual(result.unresolved_descriptions, ("BRAND NEW MATERIAL",))
+        report = Path(result.report_path).read_text(encoding="utf-8")
+        self.assertIn("New descriptions (laser, but no RADAN rule yet):", report)
+        self.assertIn("BRAND NEW MATERIAL", report)
+
+    def test_the_rule_table_is_left_exactly_as_it_was(self) -> None:
+        """A rule with blank fields is worse than no rule: column A of
+        description_rules.csv is what marks a description as known laser."""
+        before = self.rules_csv.read_text(encoding="utf-8")
+        with patch.object(bom_converter, "RadanRuleDialog", None):
+            self.convert(write_csv=False, collect_radan_rules=False)
+        self.assertEqual(self.rules_csv.read_text(encoding="utf-8"), before)
+
+    def test_known_descriptions_still_count_toward_the_export(self) -> None:
+        with patch.object(bom_converter, "RadanRuleDialog", None):
+            result = self.convert(write_csv=False, collect_radan_rules=False)
+        self.assertEqual(result.added_count, 1)
+
+    def test_no_section_when_everything_is_already_known(self) -> None:
+        """An empty '(none)' section every run is noise the operator learns to
+        skip past."""
+        self.rules_csv.write_text(
+            "Description,Material,Thickness,Strategy\n"
+            "KNOWN PANEL,Aluminum 3003,0.125,Default\n"
+            "BRAND NEW MATERIAL,Stainless Steel,0.25,AIR\n",
+            encoding="utf-8",
+        )
+        result = self.convert(write_csv=False, collect_radan_rules=False)
+        self.assertEqual(result.unresolved_descriptions, ())
+        report = Path(result.report_path).read_text(encoding="utf-8")
+        self.assertNotIn("New descriptions", report)
+
+    def test_answering_yes_it_is_laser_still_lands_in_the_red_section(self) -> None:
+        """The whole point of the tool. Normally that answer writes a rule, and
+        the description shows up as expected-laser because it is then in the
+        table; a verification run writes nothing, so the answer has to be
+        carried through directly or it vanishes from the section it belongs in.
+        """
+        bom = self.temp_dir / "nodxf-bom.csv"
+        with bom.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["Part Number", "Description", "Qty"])
+            writer.writerow(["MISSING-1", "UNSEEN MATERIAL", "1"])
+
+        class SayItIsLaser:
+            def __init__(self, items):
+                self.expected_descriptions = [item["desc"] for item in items]
+
+            def exec(self):
+                return bom_converter.QDialog.Accepted
+
+        with (
+            self.patch_config_paths(),
+            patch.object(bom_converter, "MissingDxfDialog", SayItIsLaser),
+        ):
+            result = bom_converter.convert_bom_to_radan_csv(
+                str(bom), allow_prompts=True, show_summary=False,
+                write_csv=False, collect_radan_rules=False,
+            )
+
+        self.assertEqual(result.expected_missing_dxfs, ("MISSING-1.dxf",))
+        report = Path(result.report_path).read_text(encoding="utf-8")
+        self.assertIn("MISSING-1.dxf", report)
+        # and it is still flagged as needing a rule from somebody who has one
+        self.assertIn("UNSEEN MATERIAL", result.unresolved_descriptions)
+
+    def test_the_laser_programmers_path_still_demands_a_full_rule(self) -> None:
+        """Default is unchanged: TNE and the clone launcher still get the
+        NeedsUi contract rather than a silently incomplete table."""
+        with self.assertRaises(bom_converter.InventorToRadanNeedsUi) as caught:
+            with self.patch_config_paths():
+                bom_converter.convert_bom_to_radan_csv(
+                    str(self.bom_path), allow_prompts=False, show_summary=False
+                )
+        self.assertIn("BRAND NEW MATERIAL", caught.exception.missing_rules)
+
+
 if __name__ == "__main__":
     unittest.main()
