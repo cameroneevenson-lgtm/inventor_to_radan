@@ -67,26 +67,11 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
-# Shown by the bootloader while the onefile bundle unpacks, which is the few
-# seconds before any of our code runs and so the only part a splash can cover.
-# It uses the Tcl/Tk already in the bundle, so it costs nothing extra.
-splash = Splash(  # noqa: F821 - injected by PyInstaller
-    os.path.join(ROOT, "splash.png"),
-    binaries=a.binaries,
-    datas=a.datas,
-    text_pos=(20, 120),
-    text_size=10,
-    text_color="#F8FAFC",
-    always_on_top=False,
-)
-
 # One file: the whole point is handing a colleague a single thing to copy. It
 # costs a few seconds on every launch while the bundle unpacks to temp.
 exe = EXE(
     pyz,
     a.scripts,
-    splash,
-    splash.binaries,
     a.binaries,
     a.datas,
     [],

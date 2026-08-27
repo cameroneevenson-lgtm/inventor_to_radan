@@ -566,6 +566,21 @@ class BomShortlistTests(unittest.TestCase):
         self.assertEqual(sorted(streamed), sorted(returned),
                          "streamed rows and the final list must agree")
 
+    def test_the_walk_stops_at_its_time_budget(self) -> None:
+        """The full share walk is ~25 s. Folders are visited newest-first, so
+        cutting it short drops the oldest end of the search."""
+        for i in range(40):
+            self.make(f"job{i:02d}/bom{i:02d}-BOM.xlsx", age_days=i)
+
+        started = time.monotonic()
+        bom_finder.find_recent_boms(str(self.root), time_budget=0.0)
+        self.assertLess(time.monotonic() - started, 2.0, "budget of 0 should return at once")
+
+    def test_no_budget_walks_everything(self) -> None:
+        for i in range(5):
+            self.make(f"job{i}/bom{i}-BOM.xlsx", age_days=i)
+        self.assertEqual(len(self.find()), 5)
+
     def test_only_spreadsheets(self) -> None:
         self.make("job/real-BOM.xlsx")
         self.make("job/notes.txt")

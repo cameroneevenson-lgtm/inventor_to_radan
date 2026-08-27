@@ -118,8 +118,8 @@ import CSV - that stays the laser programmer's artifact.
 
 Launched from a shortcut it opens a picker with a **Select BOM...** button and stays open
 afterwards, because fix-and-recheck is the normal loop. A BOM dropped on the exe is checked
-once. Being a onefile build it unpacks to temp on every launch; a splash covers that, since
-those seconds are before any of the app's own code runs. There is no console window.
+once. Being a onefile build it unpacks to temp on every launch, so the window takes a couple
+of seconds to appear. There is no console window and no splash.
 
 On launch it lists the most recently touched BOMs on the laser share, newest first, so the
 usual answer is one double-click away; **Select BOM...** still browses anywhere, and
@@ -129,16 +129,19 @@ excluded - the tool writes those next to the BOM they came from, and offering on
 an input is how somebody converts a converted file.
 
 The search root defaults to `W:\LASER\For Battleshield Fabrication`, scanned three levels
-deep and filtered to the **last 30 days**. The depth matters: a whole-job BOM sits at depth
+deep, filtered to the last 14 days, and stopped after 5 seconds. The depth matters: a whole-job BOM sits at depth
 1 (`P59979\`), a pack BOM at depth 2 (`F59270\EXTERIOR PACK\`), and anything under
 `PUMP PACK\` at depth 3 - so a shallower scan shows job BOMs while silently hiding every
 canonical kit BOM. Rows are labelled with the folder path relative to the root, because a
 kit BOM's own folder is called `PUMP HOUSE` and does not say which truck.
 
+Folders are walked newest-first, which is what makes the 5-second cap safe: everything
+current turns up in the first second or two, and what the cap drops is the oldest end of
+the search. Measured on the real share, capping a 20.8 s walk at 5 s returned exactly the
+same BOMs. Rows appear in the list as they are found, off the UI thread.
+
 `INVENTOR_TO_RADAN_BOM_ROOT` overrides the root; an empty string turns the shortlist off.
-If the drive is not mapped the list is simply empty and the buttons still work. The walk
-takes ~20 s over the network, so it runs off the UI thread and reports folders scanned as
-it goes.
+If the drive is not mapped the list is simply empty and the buttons still work.
 
 **It never asks a designer for a RADAN rule.** Material, thickness and strategy are the
 laser programmer's vocabulary. When the exe meets a description it has not seen, it asks

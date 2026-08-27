@@ -40,6 +40,7 @@ def find_recent_boms(
     exclude_names: tuple[str, ...] = (),
     max_depth: int = 2,
     max_age_days: float | None = None,
+    time_budget: float | None = None,
     limit: int = 15,
     on_hit=None,
 ) -> list[tuple[str, float]]:
@@ -54,18 +55,26 @@ def find_recent_boms(
     live under that root and only a couple of dozen are current work.
 
     `on_hit(path, mtime)` is called for each match as it is found, so the
-    picker can fill its list during the walk rather than after it. Over the
-    network this takes ~20 s, and rows appearing one by one is what shows the
-    thing is alive - a folder counter racing into the thousands only reads as
-    alarming.
+    picker can fill its list during the walk rather than after it.
+
+    `time_budget` caps the walk in seconds. Folders are visited newest-first,
+    so what gets dropped is the oldest end of the search, which is also the
+    least likely to be wanted - the full walk is ~25 s over the network and
+    every current BOM turns up in the first second or two of it.
 
     Returns an empty list rather than raising if the drive is not mapped - the
     picker still works, it just has nothing to suggest.
     """
     found: list[tuple[str, float]] = []
     cutoff = None if max_age_days is None else time.time() - max_age_days * 86400
+    deadline = None if time_budget is None else time.monotonic() + time_budget
+
+    def out_of_time() -> bool:
+        return deadline is not None and time.monotonic() >= deadline
 
     def walk(path: str, depth: int) -> None:
+        if out_of_time():
+            return
         subdirs: list[tuple[float, str]] = []
         try:
             with os.scandir(path) as entries:
@@ -94,6 +103,8 @@ def find_recent_boms(
         # I/O. It only changes the order results arrive in - everything is
         # still visited, and the finished list is sorted by date regardless.
         for _, child in sorted(subdirs, reverse=True):
+            if out_of_time():
+                return
             walk(child, depth + 1)
 
     if not root:

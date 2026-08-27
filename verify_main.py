@@ -46,20 +46,6 @@ def record_crash(exc: BaseException) -> str:
     return path
 
 
-def close_splash() -> None:
-    """Dismiss the PyInstaller splash once there is a real window to look at.
-
-    pyi_splash exists only inside the frozen build; a plain run has no splash
-    to close. If it is never called the banner sits on top of the app.
-    """
-    try:
-        import pyi_splash  # type: ignore[import-not-found]
-
-        pyi_splash.close()
-    except Exception:
-        pass
-
-
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
 
@@ -72,7 +58,6 @@ def main(argv: list[str] | None = None) -> int:
 
     ensure_root()
     bom_converter.ensure_config_csvs()
-    close_splash()
 
     def verify_one(bom_path: str) -> str:
         name = os.path.basename(bom_path)
@@ -107,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
         "exclude_names": config.CONFIG_CSV_NAMES,
         "max_depth": config.BOM_SEARCH_DEPTH,
         "max_age_days": config.BOM_MAX_AGE_DAYS,
+        "time_budget": config.BOM_SCAN_SECONDS,
         "limit": config.BOM_SHORTLIST_LIMIT,
     }
 
@@ -126,7 +112,6 @@ def run() -> int:
     try:
         return main()
     except BaseException as exc:  # noqa: BLE001 - last line before silence
-        close_splash()
         log = record_crash(exc)
         try:
             from tkinter import messagebox

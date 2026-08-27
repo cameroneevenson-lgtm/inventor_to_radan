@@ -90,9 +90,7 @@ class BomPickerDialog(TkDialog):
     # ---- shortlist
 
     def _window_label(self) -> str:
-        days = self._scan_settings.get("max_age_days")
-        window = f"last {days:g} days" if days else "recent"
-        return f"BOMs in {os.path.basename(self._search_root)} ({window})"
+        return f"Recent BOMs in {os.path.basename(self._search_root)}"
 
     def start_scan(self, *, force: bool = False) -> None:
         if not self._search_root:
@@ -134,10 +132,7 @@ class BomPickerDialog(TkDialog):
                 self._populate(self._ordered(snapshot), final=False)
             self._tick += 1
             dots = "." * (self._tick % 4)
-            self.list_label.configure(
-                text=f"{self._window_label()} - searching{dots} "
-                     f"({len(snapshot)} so far)"
-            )
+            self.list_label.configure(text=f"{self._window_label()} - searching{dots}")
             self.window.after(200, self._poll_scan)
             return
         global _SHORTLIST_CACHE
@@ -163,14 +158,13 @@ class BomPickerDialog(TkDialog):
             if not final:
                 return
             self.list_label.configure(
-                text=f"{self._window_label()} - none found. "
-                     "Use Select BOM... for anything older."
+                text=f"{self._window_label()} - none found. Use Select BOM..."
             )
             self._sync_verify_button()
             return
 
-        suffix = "" if final else " - searching"
-        self.list_label.configure(text=f"{self._window_label()} ({len(hits)}){suffix}:")
+        suffix = " - searching" if not final else ":"
+        self.list_label.configure(text=f"{self._window_label()}{suffix}")
         for path, mtime in hits:
             when = time.strftime("%Y-%m-%d", time.localtime(mtime))
             # The folder path relative to the root, not just the parent: a kit

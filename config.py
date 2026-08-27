@@ -167,9 +167,15 @@ BOM_SEARCH_ROOT = os.environ.get(
 # never appeared. Depth 4 exists but held nothing recent and doubles the walk.
 BOM_SEARCH_DEPTH = 3
 
-# Only the last 30 days count as "recent". The share holds ~800 spreadsheets
-# under this root; without a window the list is a museum.
-BOM_MAX_AGE_DAYS = 30
+# What counts as recent. The share holds ~800 spreadsheets under this root;
+# without a window the list is a museum.
+BOM_MAX_AGE_DAYS = 14
+
+# Stop searching after this long, whatever is left unwalked. Folders are
+# visited newest-first, so the current work lands in the first second or two
+# and the rest of the walk only turns up older jobs. Measured on the real
+# share: every hit arrived inside 2 s of a 25 s walk.
+BOM_SCAN_SECONDS = 5.0
 
 # A cap, not the governing rule - the age window is. Sized so it rarely binds.
 BOM_SHORTLIST_LIMIT = 40
