@@ -134,6 +134,14 @@ keys, so the classify dialog's order and the output CSV's row order are sorted, 
 keeps CRLF. `truck_nest_explorer`'s copy of the review dialog is still Qt - that is TNE's
 file, and only the report *content* has to stay in step.
 
+**The frozen build is windowed, so `print()` is a crash, not a no-op.** PyInstaller sets
+`sys.stdout`/`sys.stderr` to `None` with `console=False`; use `bom_converter.tell()`, which
+shows a message box when frozen and prints otherwise. The two last-resort handlers that
+cannot use it wrap their prints. Its rule tables live in `data\` beside the exe, and
+`config._migrate_loose_tables` moves them there from the older loose layout - on a deployed
+copy those files are the live tables, so seeding a fresh `data\` instead would destroy
+every classification made since it went out.
+
 ## Branching
 
 All work happens on `main`. Do not create branches for agent work - commit and push straight to `main`. If an agent branch does turn up, fold it into `main`, prune it locally and on the remote, then push.

@@ -118,8 +118,8 @@ import CSV - that stays the laser programmer's artifact.
 
 Launched from a shortcut it opens a picker with a **Select BOM...** button and stays open
 afterwards, because fix-and-recheck is the normal loop. A BOM dropped on the exe is checked
-once. Being a onefile build it unpacks to temp on every launch, so expect 5-15 s before the
-first window appears.
+once. Being a onefile build it unpacks to temp on every launch; a splash covers that, since
+those seconds are before any of the app's own code runs. There is no console window.
 
 On launch it lists the most recently touched BOMs on the laser share, newest first, so the
 usual answer is one double-click away; **Select BOM...** still browses anywhere, and
@@ -149,16 +149,21 @@ a row with blank fields is worse than no row: column A of `description_rules.csv
 marks a description as known laser. A "not laser" answer is still saved, as it is a complete
 answer on its own.
 
-The four rule CSVs sit **beside the exe**, not in a per-user folder, seeded on first run
-from copies frozen into the bundle by the checkout that built it. So a fresh copy starts
-with the shop's catalog as of build time and grows from there, and an exe put on a share
-works as one shared installation: everyone running it reads and writes the same tables.
+The four rule CSVs live in a **`data\` folder beside the exe**, not in a per-user folder,
+seeded on first run from copies frozen into the bundle by the checkout that built it. So a
+fresh copy starts with the shop's catalog as of build time and grows from there, and an exe
+put on a share works as one shared installation: everyone running it reads and writes the
+same tables.
+
+An older build kept those CSVs loose beside the exe. The first run of a newer build **moves
+them into `data\`** rather than seeding a fresh set - on a deployed copy the loose files
+are the live tables, not a stale snapshot.
 
 **Updating a deployed copy: send the exe, not the folder.** Once people have been using it,
-the four CSVs beside the exe are the live tables, holding every classification made since it
-was deployed. Copying a freshly built folder over the top replaces them with the build-time
-snapshot and throws that away. Replace `BOM Verify.exe` alone and leave the CSVs where they
-are; they are forward-compatible, and anything genuinely new reseeds only if missing.
+the CSVs in `data\` are the live tables, holding every classification made since it was
+deployed. Copying a freshly built folder over the top replaces them with the build-time
+snapshot and throws that away. Replace `BOM Verify.exe` alone and leave `data\` where it
+is; it is forward-compatible, and anything genuinely new reseeds only if missing.
 
 If the location is read-only the tool falls back to `%LOCALAPPDATA%\inventor_to_radan`,
 because it still has to be able to learn a rule. `INVENTOR_TO_RADAN_DATA_DIR` overrides
