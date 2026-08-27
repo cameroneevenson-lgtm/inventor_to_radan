@@ -576,6 +576,20 @@ class BomShortlistTests(unittest.TestCase):
         bom_finder.find_recent_boms(str(self.root), time_budget=0.0)
         self.assertLess(time.monotonic() - started, 2.0, "budget of 0 should return at once")
 
+    def test_the_walk_stops_once_the_list_is_full(self) -> None:
+        """Not just trimmed at the end - stopped. on_hit firing for every file
+        on the share would mean it walked the whole thing and threw the rest
+        away, which is the 20 s this is meant to avoid."""
+        for i in range(30):
+            self.make(f"job{i:02d}/bom{i:02d}-BOM.xlsx", age_days=i)
+
+        streamed: list[str] = []
+        found = bom_finder.find_recent_boms(
+            str(self.root), limit=10, on_hit=lambda p, m: streamed.append(p)
+        )
+        self.assertEqual(len(found), 10)
+        self.assertEqual(len(streamed), 10, "walked past the limit instead of stopping")
+
     def test_no_budget_walks_everything(self) -> None:
         for i in range(5):
             self.make(f"job{i}/bom{i}-BOM.xlsx", age_days=i)

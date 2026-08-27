@@ -121,9 +121,10 @@ anything under `PUMP PACK` at depth 3; a shallower bound still lists job BOMs, s
 like it works while hiding every canonical kit BOM. It must also never offer a
 `*_Radan.csv` or the app's own rule tables - this tool writes both into the folders it
 scans, and listing one is how somebody converts a converted file. Filtered to 14 days
-(~800 spreadsheets live under that root), walked newest-first, capped at 5 s, and run on a
-worker thread. The ordering is what makes the cap safe - current work surfaces in the first
-second or two, so the cap drops only the oldest end of the search; on the real share a 5 s
+(~800 spreadsheets live under that root), walked newest-first, stopped at 10 results or 5 s
+(whichever first), and run on a worker thread. The ordering is what makes both caps safe -
+current work surfaces in the first second or two, so they drop only the oldest end of the
+search; on the real share a 5 s
 cap returned the same BOMs as the full 20.8 s walk. A share that is slow or unmapped would
 otherwise freeze the window before it appeared.
 

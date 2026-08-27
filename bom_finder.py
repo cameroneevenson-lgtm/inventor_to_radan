@@ -57,10 +57,14 @@ def find_recent_boms(
     `on_hit(path, mtime)` is called for each match as it is found, so the
     picker can fill its list during the walk rather than after it.
 
-    `time_budget` caps the walk in seconds. Folders are visited newest-first,
-    so what gets dropped is the oldest end of the search, which is also the
-    least likely to be wanted - the full walk is ~25 s over the network and
+    The walk stops at whichever comes first: `limit` results, or `time_budget`
+    seconds. Folders are visited newest-first, so what either one drops is the
+    oldest end of the search - the full walk is ~25 s over the network and
     every current BOM turns up in the first second or two of it.
+
+    Because that ordering is a heuristic (a folder's own timestamp, not its
+    contents'), stopping at `limit` returns the first N found rather than a
+    guaranteed newest N. They are still sorted by date on the way out.
 
     Returns an empty list rather than raising if the drive is not mapped - the
     picker still works, it just has nothing to suggest.
@@ -69,11 +73,13 @@ def find_recent_boms(
     cutoff = None if max_age_days is None else time.time() - max_age_days * 86400
     deadline = None if time_budget is None else time.monotonic() + time_budget
 
-    def out_of_time() -> bool:
+    def should_stop() -> bool:
+        if limit and len(found) >= limit:
+            return True
         return deadline is not None and time.monotonic() >= deadline
 
     def walk(path: str, depth: int) -> None:
-        if out_of_time():
+        if should_stop():
             return
         subdirs: list[tuple[float, str]] = []
         try:
@@ -90,6 +96,8 @@ def find_recent_boms(
                             found.append((entry.path, mtime))
                             if on_hit is not None:
                                 on_hit(entry.path, mtime)
+                            if should_stop():
+                                return
                     except OSError:
                         continue
         except OSError:
@@ -103,7 +111,7 @@ def find_recent_boms(
         # I/O. It only changes the order results arrive in - everything is
         # still visited, and the finished list is sorted by date regardless.
         for _, child in sorted(subdirs, reverse=True):
-            if out_of_time():
+            if should_stop():
                 return
             walk(child, depth + 1)
 

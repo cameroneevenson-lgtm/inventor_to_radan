@@ -177,8 +177,10 @@ BOM_MAX_AGE_DAYS = 14
 # share: every hit arrived inside 2 s of a 25 s walk.
 BOM_SCAN_SECONDS = 5.0
 
-# A cap, not the governing rule - the age window is. Sized so it rarely binds.
-BOM_SHORTLIST_LIMIT = 40
+# Stop once this many are found - a stopping condition, not just a trim. With
+# newest-first traversal the first hits are the current work, so filling the
+# list is reason enough to stop walking the rest of the share.
+BOM_SHORTLIST_LIMIT = 10
 
 RADAN_OUTPUT_SUFFIX = "_Radan.csv"
 REPORT_SUFFIX = "_report.txt"
