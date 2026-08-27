@@ -159,6 +159,13 @@ An older build kept those CSVs loose beside the exe. The first run of a newer bu
 them into `data\`** rather than seeding a fresh set - on a deployed copy the loose files
 are the live tables, not a stale snapshot.
 
+**`data.backup\` is the safety net.** At every launch the live tables are copied there
+before anything can change them, and a missing table is restored from that copy in
+preference to the frozen snapshot. Deleting `data\` therefore costs at most the current
+session rather than everything learned since the exe was built. It sits *beside* `data\`
+on purpose - inside, it would be deleted along with what it protects. To genuinely reset a
+copy to factory tables, delete both folders.
+
 **Updating a deployed copy: send the exe, not the folder.** Once people have been using it,
 the CSVs in `data\` are the live tables, holding every classification made since it was
 deployed. Copying a freshly built folder over the top replaces them with the build-time

@@ -140,7 +140,9 @@ shows a message box when frozen and prints otherwise. The two last-resort handle
 cannot use it wrap their prints. Its rule tables live in `data\` beside the exe, and
 `config._migrate_loose_tables` moves them there from the older loose layout - on a deployed
 copy those files are the live tables, so seeding a fresh `data\` instead would destroy
-every classification made since it went out.
+every classification made since it went out. `data.backup\` is taken at every launch and
+is preferred over the frozen snapshot when restoring; it must stay *outside* `data\`, or
+deleting that folder takes the backup with it.
 
 ## Branching
 
