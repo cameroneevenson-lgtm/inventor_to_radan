@@ -23,11 +23,10 @@ class BomPickerDialog(TkDialog):
     because the answer is nearly always one of the last few BOMs exported to
     the share, and navigating to it by hand is the slow part.
 
-    The share walk runs on a worker thread and the window polls for its
-    result. Warm it is about a second, but this is a network drive: cold,
-    busy, or with W: not mapped it can block for much longer, and a frozen
-    window on startup is precisely the "nothing happens" failure this app has
-    already worn once.
+    The share walk runs on a worker thread and the window polls for it,
+    reporting folders scanned as it goes. It takes ~20 s over the network, and
+    a frozen window on startup is precisely the "nothing happens" failure this
+    app has already worn once.
     """
 
     title = "Verify Inventor BOM"
@@ -39,6 +38,7 @@ class BomPickerDialog(TkDialog):
         self._scan_settings = dict(scan)
         self._search_root = self._scan_settings.get("root", "")
         self._scan_result: list | None = None
+        self._scan_progress: tuple[int, int] = (0, 0)
         self._paths: list[str] = []
 
         make_label(
@@ -87,6 +87,11 @@ class BomPickerDialog(TkDialog):
 
     # ---- shortlist
 
+    def _window_label(self) -> str:
+        days = self._scan_settings.get("max_age_days")
+        window = f"last {days:g} days" if days else "recent"
+        return f"BOMs in {os.path.basename(self._search_root)} ({window})"
+
     def start_scan(self, *, force: bool = False) -> None:
         if not self._search_root:
             self.list_label.configure(text="Recent BOMs: shortlist disabled.")
@@ -95,13 +100,17 @@ class BomPickerDialog(TkDialog):
             self._populate(_SHORTLIST_CACHE)
             return
 
-        self.list_label.configure(text=f"Recent BOMs in {self._search_root} - scanning...")
+        self.list_label.configure(text=f"{self._window_label()} - scanning...")
         self.refresh_button.configure(state="disabled")
         self._scan_result = None
+        self._scan_progress = (0, 0)
 
         def worker(settings=dict(self._scan_settings)):
+            def on_progress(dirs_scanned, hits):
+                self._scan_progress = (dirs_scanned, hits)
+
             try:
-                hits = find_recent_boms(**settings)
+                hits = find_recent_boms(progress=on_progress, **settings)
             except Exception:
                 hits = []
             self._scan_result = hits
@@ -113,7 +122,15 @@ class BomPickerDialog(TkDialog):
         if not self.window.winfo_exists():
             return
         if self._scan_result is None:
-            self.window.after(100, self._poll_scan)
+            # The share walk takes ~20 s. A status line that says nothing for
+            # that long reads as a hang, which this app has been mistaken for
+            # before.
+            dirs_scanned, hits = self._scan_progress
+            self.list_label.configure(
+                text=f"{self._window_label()} - scanning... "
+                     f"{dirs_scanned} folders, {hits} found"
+            )
+            self.window.after(150, self._poll_scan)
             return
         global _SHORTLIST_CACHE
         _SHORTLIST_CACHE = self._scan_result
@@ -125,16 +142,25 @@ class BomPickerDialog(TkDialog):
         self._paths = []
         if not hits:
             self.list_label.configure(
-                text=f"Recent BOMs in {self._search_root} - none found (drive not mapped?)."
+                text=f"{self._window_label()} - none found. "
+                     "Use Select BOM... for anything older."
             )
             self._sync_verify_button()
             return
 
-        self.list_label.configure(text=f"Recent BOMs in {self._search_root}:")
+        self.list_label.configure(text=f"{self._window_label()} ({len(hits)}):")
         for path, mtime in hits:
             when = time.strftime("%Y-%m-%d", time.localtime(mtime))
-            job = os.path.basename(os.path.dirname(path))
-            self.listbox.insert("end", f"{when}   {os.path.basename(path)}   [{job}]")
+            # The folder path relative to the root, not just the parent: a kit
+            # BOM's parent is "PUMP HOUSE", which without "F59808 / PUMP PACK"
+            # in front of it does not say which truck.
+            folder = os.path.dirname(path)
+            try:
+                folder = os.path.relpath(folder, self._search_root)
+            except ValueError:
+                folder = os.path.basename(folder)
+            location = folder.replace(os.sep, " / ")
+            self.listbox.insert("end", f"{when}   {os.path.basename(path)}   [{location}]")
             self._paths.append(path)
         self._sync_verify_button()
 

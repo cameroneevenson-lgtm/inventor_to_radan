@@ -115,11 +115,15 @@ The build runs from `.buildvenv`, never `C:\Tools\.venv`: PyInstaller bundles wh
 venv holds, and the shared one made a 9 MB app into a 235 MB folder. Its spec is committed
 so the exclusions stay reviewable.
 
-**The picker's shortlist must never offer a `*_Radan.csv`.** `bom_finder.py` scans the
-laser share for recent BOMs, and this tool's own output lands in the same folders as its
-input - listing one is how somebody converts a converted file. The scan is depth-bounded
-(jobs sit two levels under the root) and runs on a `QThread`: it is a network drive, and a
-share that is slow or unmapped would otherwise freeze the window before it ever appeared.
+**The picker's shortlist scans three levels below `For Battleshield Fabrication`, and the
+depth is the whole point.** A whole-job BOM is at depth 1, a pack BOM at depth 2, and
+anything under `PUMP PACK` at depth 3; a shallower bound still lists job BOMs, so it looks
+like it works while hiding every canonical kit BOM. It must also never offer a
+`*_Radan.csv` or the app's own rule tables - this tool writes both into the folders it
+scans, and listing one is how somebody converts a converted file. Filtered to 30 days
+(~800 spreadsheets live under that root) and run on a worker thread: the walk is ~20 s over
+the network, and a share that is slow or unmapped would otherwise freeze the window before
+it appeared.
 
 **The GUI is tkinter and the BOM is a list of dicts - both were size decisions.** pandas
 and PySide6 were ~70 MB of the frozen exe while only reading spreadsheets and drawing four

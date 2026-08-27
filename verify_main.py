@@ -91,6 +91,7 @@ def main(argv: list[str] | None = None) -> int:
         # inside the search root as four .csv files that are not BOMs.
         "exclude_names": config.CONFIG_CSV_NAMES,
         "max_depth": config.BOM_SEARCH_DEPTH,
+        "max_age_days": config.BOM_MAX_AGE_DAYS,
         "limit": config.BOM_SHORTLIST_LIMIT,
     }
 

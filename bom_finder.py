@@ -7,6 +7,7 @@ longer than the frozen exe's own startup.
 from __future__ import annotations
 
 import os
+import time
 
 
 def _is_candidate(
@@ -38,28 +39,48 @@ def find_recent_boms(
     radan_suffix: str = "_Radan.csv",
     exclude_names: tuple[str, ...] = (),
     max_depth: int = 2,
+    max_age_days: float | None = None,
     limit: int = 15,
+    progress=None,
 ) -> list[tuple[str, float]]:
     """Newest-first `(path, mtime)` for spreadsheets under `root`.
 
-    Depth-bounded because the share is deep and mostly not BOMs; jobs sit two
-    levels down, as in `LASER / For Battleshield Fabrication / F59822 /
-    F59822-BOM.xlsx`.
+    Depth-bounded because the share is deep and mostly not BOMs. The bound has
+    to clear the kit packs, not just job folders: under the fabrication root a
+    whole-job BOM is at depth 1, a pack BOM at depth 2, and anything under
+    PUMP PACK at depth 3.
+
+    `max_age_days` is what makes the list "recent" - roughly 800 spreadsheets
+    live under that root and only a couple of dozen are current work.
+
+    `progress(dirs_scanned, hits)` is called as the walk proceeds. Over the
+    network this takes ~20 s, and a status line that says nothing for that long
+    is indistinguishable from a hang.
+
     Returns an empty list rather than raising if the drive is not mapped - the
     picker still works, it just has nothing to suggest.
     """
     found: list[tuple[str, float]] = []
+    cutoff = None if max_age_days is None else time.time() - max_age_days * 86400
+    scanned = 0
 
     def walk(path: str, depth: int) -> None:
+        nonlocal scanned
         try:
             with os.scandir(path) as entries:
                 for entry in entries:
                     try:
                         if entry.is_dir(follow_symlinks=False):
                             if depth < max_depth:
+                                scanned += 1
+                                if progress is not None:
+                                    progress(scanned, len(found))
                                 walk(entry.path, depth + 1)
                         elif _is_candidate(entry.name, extensions, radan_suffix, exclude_names):
-                            found.append((entry.path, entry.stat().st_mtime))
+                            mtime = entry.stat().st_mtime
+                            if cutoff is not None and mtime < cutoff:
+                                continue
+                            found.append((entry.path, mtime))
                     except OSError:
                         continue
         except OSError:
@@ -68,5 +89,7 @@ def find_recent_boms(
     if not root:
         return []
     walk(root, 0)
+    if progress is not None:
+        progress(scanned, len(found))
     found.sort(key=lambda pair: pair[1], reverse=True)
     return found[:limit]

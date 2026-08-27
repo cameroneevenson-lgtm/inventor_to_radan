@@ -518,6 +518,48 @@ class BomShortlistTests(unittest.TestCase):
         names = [Path(p).name for p in self.find(exclude_names=("description_rules.csv",))]
         self.assertEqual(names, ["real-BOM.xlsx"])
 
+    def test_only_the_last_30_days_count_as_recent(self) -> None:
+        """The share holds ~800 spreadsheets under the fabrication root. Without
+        a window the shortlist is a museum, not a list of current work."""
+        self.make("job/this-week-BOM.xlsx", age_days=3)
+        self.make("job/last-year-BOM.xlsx", age_days=400)
+        self.make("job/just-inside-BOM.xlsx", age_days=29)
+        self.make("job/just-outside-BOM.xlsx", age_days=31)
+
+        names = sorted(Path(p).name for p in self.find(max_age_days=30))
+        self.assertEqual(names, ["just-inside-BOM.xlsx", "this-week-BOM.xlsx"])
+
+    def test_no_age_window_keeps_everything(self) -> None:
+        self.make("job/ancient-BOM.xlsx", age_days=900)
+        self.assertEqual([Path(p).name for p in self.find()], ["ancient-BOM.xlsx"])
+
+    def test_kit_boms_are_reached_at_depth_three(self) -> None:
+        """A kit BOM is not at job level. Under the fabrication root a pack sits
+        one below the job and PUMP PACK nests one deeper again - the depth that
+        made the canonical kit BOMs invisible."""
+        self.make("F59979/F59979-BOM.xlsx")
+        self.make("F59270/EXTERIOR PACK/F59270-EXTERIOR PACK-BOM.xlsx")
+        self.make("F59808/PUMP PACK/PUMP HOUSE/F59808-Pump House-BOM.xlsx")
+
+        found = sorted(Path(p).name for p in self.find(max_depth=3))
+        self.assertEqual(
+            found,
+            [
+                "F59270-EXTERIOR PACK-BOM.xlsx",
+                "F59808-Pump House-BOM.xlsx",
+                "F59979-BOM.xlsx",
+            ],
+        )
+
+    def test_progress_is_reported_during_the_walk(self) -> None:
+        """20 s of silence over the network is indistinguishable from a hang."""
+        self.make("a/one-BOM.xlsx")
+        self.make("b/two-BOM.xlsx")
+        seen: list[tuple[int, int]] = []
+        self.find(progress=lambda dirs, hits: seen.append((dirs, hits)))
+        self.assertTrue(seen, "progress callback was never called")
+        self.assertEqual(seen[-1][0], 2, "should have counted both folders")
+
     def test_only_spreadsheets(self) -> None:
         self.make("job/real-BOM.xlsx")
         self.make("job/notes.txt")

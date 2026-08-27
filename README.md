@@ -128,10 +128,17 @@ of the session, so reopening the picker after a run is instant. `*_Radan.csv` fi
 excluded - the tool writes those next to the BOM they came from, and offering one back as
 an input is how somebody converts a converted file.
 
-The search root defaults to `W:\LASER` (jobs sit two levels down, under
-`For Battleshield Fabrication\` and `PSD\`). `INVENTOR_TO_RADAN_BOM_ROOT` overrides it;
-set it to an empty string to turn the shortlist off. If the drive is not mapped the list is
-simply empty and the buttons still work.
+The search root defaults to `W:\LASER\For Battleshield Fabrication`, scanned three levels
+deep and filtered to the **last 30 days**. The depth matters: a whole-job BOM sits at depth
+1 (`P59979\`), a pack BOM at depth 2 (`F59270\EXTERIOR PACK\`), and anything under
+`PUMP PACK\` at depth 3 - so a shallower scan shows job BOMs while silently hiding every
+canonical kit BOM. Rows are labelled with the folder path relative to the root, because a
+kit BOM's own folder is called `PUMP HOUSE` and does not say which truck.
+
+`INVENTOR_TO_RADAN_BOM_ROOT` overrides the root; an empty string turns the shortlist off.
+If the drive is not mapped the list is simply empty and the buttons still work. The walk
+takes ~20 s over the network, so it runs off the UI thread and reports folders scanned as
+it goes.
 
 **It never asks a designer for a RADAN rule.** Material, thickness and strategy are the
 laser programmer's vocabulary. When the exe meets a description it has not seen, it asks

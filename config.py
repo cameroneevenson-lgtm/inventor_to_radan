@@ -100,11 +100,26 @@ CONFIG_CSV_NAMES = (
 )
 
 # Where the picker looks for recently-touched BOMs to offer as a shortlist.
-# Jobs live two levels down, under "For Battleshield Fabrication" and "PSD".
 # Empty string disables the shortlist; the Select BOM... button is unaffected.
-BOM_SEARCH_ROOT = os.environ.get("INVENTOR_TO_RADAN_BOM_ROOT", r"W:\LASER")
-BOM_SEARCH_DEPTH = 2
-BOM_SHORTLIST_LIMIT = 15
+BOM_SEARCH_ROOT = os.environ.get(
+    "INVENTOR_TO_RADAN_BOM_ROOT", r"W:\LASER\For Battleshield Fabrication"
+)
+
+# Depth 3, because a kit BOM is not at job level. Measured under that root:
+#   depth 1  P59979\P59979-BOM.xlsx                        (whole-job BOM)
+#   depth 2  F59270\EXTERIOR PACK\F59270-EXTERIOR PACK-BOM.xlsx
+#   depth 3  F59808\PUMP PACK\PUMP HOUSE\F59808-Pump House-BOM.xlsx
+# Rooting at W:\LASER with depth 2 reached only the first of those, which is
+# why the canonical kit BOMs - the packs, and everything under PUMP PACK -
+# never appeared. Depth 4 exists but held nothing recent and doubles the walk.
+BOM_SEARCH_DEPTH = 3
+
+# Only the last 30 days count as "recent". The share holds ~800 spreadsheets
+# under this root; without a window the list is a museum.
+BOM_MAX_AGE_DAYS = 30
+
+# A cap, not the governing rule - the age window is. Sized so it rarely binds.
+BOM_SHORTLIST_LIMIT = 40
 
 RADAN_OUTPUT_SUFFIX = "_Radan.csv"
 REPORT_SUFFIX = "_report.txt"
