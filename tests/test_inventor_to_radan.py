@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import importlib.util
 import os
+import shutil
 import sys
 import tempfile
 import time
@@ -552,14 +553,18 @@ class BomShortlistTests(unittest.TestCase):
             ],
         )
 
-    def test_progress_is_reported_during_the_walk(self) -> None:
-        """20 s of silence over the network is indistinguishable from a hang."""
+    def test_hits_are_reported_as_they_are_found(self) -> None:
+        """The picker fills its list during the ~20 s walk rather than after
+        it. Rows appearing is what shows the thing is alive; a folder counter
+        climbing into the thousands only reads as alarming."""
         self.make("a/one-BOM.xlsx")
         self.make("b/two-BOM.xlsx")
-        seen: list[tuple[int, int]] = []
-        self.find(progress=lambda dirs, hits: seen.append((dirs, hits)))
-        self.assertTrue(seen, "progress callback was never called")
-        self.assertEqual(seen[-1][0], 2, "should have counted both folders")
+        streamed: list[str] = []
+        returned = self.find(on_hit=lambda path, mtime: streamed.append(path))
+
+        self.assertEqual(len(streamed), 2, "on_hit was not called for every match")
+        self.assertEqual(sorted(streamed), sorted(returned),
+                         "streamed rows and the final list must agree")
 
     def test_only_spreadsheets(self) -> None:
         self.make("job/real-BOM.xlsx")
@@ -746,6 +751,100 @@ class FrozenDataFolderTests(unittest.TestCase):
         config._migrate_loose_tables(str(self.exe_dir))
         for name in config.CONFIG_CSV_NAMES:
             self.assertTrue((self.exe_dir / name).exists())
+
+
+class TableBackupTests(unittest.TestCase):
+    """The data folder is the only record of what a deployed exe has learned. Deleting
+    it used to be a silent rollback to the build-time snapshot, so a copy of
+    the last known-good tables is kept beside it.
+    """
+
+    def setUp(self) -> None:
+        self._temp_context = tempfile.TemporaryDirectory(prefix="inventor_to_radan_bak_")
+        root = Path(self._temp_context.name)
+        self.data_dir = root / "data"
+        self.backup_dir = root / "data.backup"
+        self.bundle = root / "bundle"
+        self.bundle.mkdir()
+        self.data_dir.mkdir()
+        for name in config.CONFIG_CSV_NAMES:
+            (self.bundle / name).write_text("SNAPSHOT\n", encoding="utf-8")
+            (self.data_dir / name).write_text("LEARNED SINCE DEPLOYMENT\n", encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self._temp_context.cleanup()
+
+    def back_up(self):
+        rule_store.back_up_tables(
+            str(self.data_dir), str(self.backup_dir), config.CONFIG_CSV_NAMES
+        )
+
+    def restore(self):
+        """What ensure_config_csvs does: backup first, snapshot only after."""
+        for name in config.CONFIG_CSV_NAMES:
+            target = str(self.data_dir / name)
+            rule_store.seed_csv(str(self.backup_dir / name), target)
+            rule_store.seed_csv(str(self.bundle / name), target)
+
+    def test_the_backup_survives_deleting_the_folder_it_protects(self) -> None:
+        """The property that matters. Inside `data`, the backup would be
+        deleted along with what it protects, and the next launch would reseed
+        from the snapshot and back *that* up - destroying the only good copy on
+        the second launch rather than the first."""
+        self.back_up()
+        shutil.rmtree(self.data_dir)
+
+        self.assertTrue(self.backup_dir.is_dir(), "backup went with the data folder")
+        for name in config.CONFIG_CSV_NAMES:
+            self.assertEqual(
+                (self.backup_dir / name).read_text(encoding="utf-8"),
+                "LEARNED SINCE DEPLOYMENT\n",
+            )
+
+    def test_deleting_the_data_folder_costs_nothing_after_a_backup(self) -> None:
+        self.back_up()
+        shutil.rmtree(self.data_dir)
+        self.data_dir.mkdir()
+        self.restore()
+        for name in config.CONFIG_CSV_NAMES:
+            self.assertEqual(
+                (self.data_dir / name).read_text(encoding="utf-8"),
+                "LEARNED SINCE DEPLOYMENT\n",
+                f"{name} fell back to the build-time snapshot",
+            )
+
+    def test_the_snapshot_is_used_only_when_there_is_no_backup(self) -> None:
+        shutil.rmtree(self.data_dir)
+        self.data_dir.mkdir()
+        self.restore()
+        for name in config.CONFIG_CSV_NAMES:
+            self.assertEqual((self.data_dir / name).read_text(encoding="utf-8"), "SNAPSHOT\n")
+
+    def test_a_truncated_table_never_overwrites_a_good_backup(self) -> None:
+        """Backing up an empty file would launder the corruption into the only
+        copy that could have fixed it."""
+        self.back_up()
+        (self.data_dir / "description_rules.csv").write_text("", encoding="utf-8")
+        self.back_up()
+        self.assertEqual(
+            (self.backup_dir / "description_rules.csv").read_text(encoding="utf-8"),
+            "LEARNED SINCE DEPLOYMENT\n",
+        )
+
+    def test_a_truncated_table_is_repaired_from_the_backup(self) -> None:
+        self.back_up()
+        (self.data_dir / "description_rules.csv").write_text("", encoding="utf-8")
+        self.restore()
+        self.assertEqual(
+            (self.data_dir / "description_rules.csv").read_text(encoding="utf-8"),
+            "LEARNED SINCE DEPLOYMENT\n",
+        )
+
+    def test_backup_is_disabled_for_a_checkout(self) -> None:
+        """A clone's tables are version controlled - git is the backup, and a
+        stray folder beside the repo would just be litter."""
+        rule_store.back_up_tables(str(self.data_dir), "", config.CONFIG_CSV_NAMES)
+        self.assertFalse(self.backup_dir.exists())
 
 
 if __name__ == "__main__":

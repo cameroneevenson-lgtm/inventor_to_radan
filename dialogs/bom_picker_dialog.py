@@ -38,7 +38,9 @@ class BomPickerDialog(TkDialog):
         self._scan_settings = dict(scan)
         self._search_root = self._scan_settings.get("root", "")
         self._scan_result: list | None = None
-        self._scan_progress: tuple[int, int] = (0, 0)
+        self._streamed: list[tuple[str, float]] = []
+        self._rendered = -1
+        self._tick = 0
         self._paths: list[str] = []
 
         make_label(
@@ -100,17 +102,18 @@ class BomPickerDialog(TkDialog):
             self._populate(_SHORTLIST_CACHE)
             return
 
-        self.list_label.configure(text=f"{self._window_label()} - scanning...")
+        self.list_label.configure(text=f"{self._window_label()} - searching")
         self.refresh_button.configure(state="disabled")
         self._scan_result = None
-        self._scan_progress = (0, 0)
+        self._streamed = []
+        self._rendered = -1
+        self._tick = 0
 
-        def worker(settings=dict(self._scan_settings)):
-            def on_progress(dirs_scanned, hits):
-                self._scan_progress = (dirs_scanned, hits)
-
+        def worker(settings=dict(self._scan_settings), sink=self._streamed):
             try:
-                hits = find_recent_boms(progress=on_progress, **settings)
+                # list.append is atomic, so the UI thread can read a snapshot
+                # of this without a lock.
+                hits = find_recent_boms(on_hit=lambda p, m: sink.append((p, m)), **settings)
             except Exception:
                 hits = []
             self._scan_result = hits
@@ -122,25 +125,43 @@ class BomPickerDialog(TkDialog):
         if not self.window.winfo_exists():
             return
         if self._scan_result is None:
-            # The share walk takes ~20 s. A status line that says nothing for
-            # that long reads as a hang, which this app has been mistaken for
-            # before.
-            dirs_scanned, hits = self._scan_progress
+            # Rows appear as they are found, which is what shows the ~20 s walk
+            # is alive. Deliberately no folder count: it climbs into the
+            # thousands and reads as something going wrong.
+            snapshot = list(self._streamed)
+            if len(snapshot) != self._rendered:
+                self._rendered = len(snapshot)
+                self._populate(self._ordered(snapshot), final=False)
+            self._tick += 1
+            dots = "." * (self._tick % 4)
             self.list_label.configure(
-                text=f"{self._window_label()} - scanning... "
-                     f"{dirs_scanned} folders, {hits} found"
+                text=f"{self._window_label()} - searching{dots} "
+                     f"({len(snapshot)} so far)"
             )
-            self.window.after(150, self._poll_scan)
+            self.window.after(200, self._poll_scan)
             return
         global _SHORTLIST_CACHE
         _SHORTLIST_CACHE = self._scan_result
         self.refresh_button.configure(state="normal")
         self._populate(self._scan_result)
 
-    def _populate(self, hits: list[tuple[str, float]]) -> None:
+    def _ordered(self, hits: list[tuple[str, float]]) -> list[tuple[str, float]]:
+        """Newest first, capped - the same shape the finder returns, so a
+        part-way list looks like the finished one rather than reshuffling
+        when the walk ends."""
+        limit = self._scan_settings.get("limit")
+        ordered = sorted(hits, key=lambda pair: pair[1], reverse=True)
+        return ordered[:limit] if limit else ordered
+
+    def _populate(self, hits: list[tuple[str, float]], *, final: bool = True) -> None:
+        selected = None
+        if self.listbox.curselection():
+            selected = self._paths[self.listbox.curselection()[0]]
         self.listbox.delete(0, "end")
         self._paths = []
         if not hits:
+            if not final:
+                return
             self.list_label.configure(
                 text=f"{self._window_label()} - none found. "
                      "Use Select BOM... for anything older."
@@ -148,7 +169,8 @@ class BomPickerDialog(TkDialog):
             self._sync_verify_button()
             return
 
-        self.list_label.configure(text=f"{self._window_label()} ({len(hits)}):")
+        suffix = "" if final else " - searching"
+        self.list_label.configure(text=f"{self._window_label()} ({len(hits)}){suffix}:")
         for path, mtime in hits:
             when = time.strftime("%Y-%m-%d", time.localtime(mtime))
             # The folder path relative to the root, not just the parent: a kit
@@ -162,6 +184,11 @@ class BomPickerDialog(TkDialog):
             location = folder.replace(os.sep, " / ")
             self.listbox.insert("end", f"{when}   {os.path.basename(path)}   [{location}]")
             self._paths.append(path)
+        # Re-rendering mid-scan must not drop what the operator already clicked.
+        if selected is not None and selected in self._paths:
+            index = self._paths.index(selected)
+            self.listbox.selection_set(index)
+            self.listbox.activate(index)
         self._sync_verify_button()
 
     def _sync_verify_button(self) -> None:

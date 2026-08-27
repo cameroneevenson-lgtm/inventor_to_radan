@@ -41,7 +41,7 @@ def find_recent_boms(
     max_depth: int = 2,
     max_age_days: float | None = None,
     limit: int = 15,
-    progress=None,
+    on_hit=None,
 ) -> list[tuple[str, float]]:
     """Newest-first `(path, mtime)` for spreadsheets under `root`.
 
@@ -53,43 +53,51 @@ def find_recent_boms(
     `max_age_days` is what makes the list "recent" - roughly 800 spreadsheets
     live under that root and only a couple of dozen are current work.
 
-    `progress(dirs_scanned, hits)` is called as the walk proceeds. Over the
-    network this takes ~20 s, and a status line that says nothing for that long
-    is indistinguishable from a hang.
+    `on_hit(path, mtime)` is called for each match as it is found, so the
+    picker can fill its list during the walk rather than after it. Over the
+    network this takes ~20 s, and rows appearing one by one is what shows the
+    thing is alive - a folder counter racing into the thousands only reads as
+    alarming.
 
     Returns an empty list rather than raising if the drive is not mapped - the
     picker still works, it just has nothing to suggest.
     """
     found: list[tuple[str, float]] = []
     cutoff = None if max_age_days is None else time.time() - max_age_days * 86400
-    scanned = 0
 
     def walk(path: str, depth: int) -> None:
-        nonlocal scanned
+        subdirs: list[tuple[float, str]] = []
         try:
             with os.scandir(path) as entries:
                 for entry in entries:
                     try:
                         if entry.is_dir(follow_symlinks=False):
                             if depth < max_depth:
-                                scanned += 1
-                                if progress is not None:
-                                    progress(scanned, len(found))
-                                walk(entry.path, depth + 1)
+                                subdirs.append((entry.stat().st_mtime, entry.path))
                         elif _is_candidate(entry.name, extensions, radan_suffix, exclude_names):
                             mtime = entry.stat().st_mtime
                             if cutoff is not None and mtime < cutoff:
                                 continue
                             found.append((entry.path, mtime))
+                            if on_hit is not None:
+                                on_hit(entry.path, mtime)
                     except OSError:
                         continue
         except OSError:
             return
 
+        # Newest folders first, so current work surfaces in the first seconds
+        # instead of after the whole share has been walked. Directory order on
+        # NTFS is roughly creation order, which meant the oldest jobs went
+        # first and the list sat empty while they were searched. On Windows
+        # scandir already carries the stat data, so the sort costs no extra
+        # I/O. It only changes the order results arrive in - everything is
+        # still visited, and the finished list is sorted by date regardless.
+        for _, child in sorted(subdirs, reverse=True):
+            walk(child, depth + 1)
+
     if not root:
         return []
     walk(root, 0)
-    if progress is not None:
-        progress(scanned, len(found))
     found.sort(key=lambda pair: pair[1], reverse=True)
     return found[:limit]

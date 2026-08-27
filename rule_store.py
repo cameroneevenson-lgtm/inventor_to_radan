@@ -21,9 +21,45 @@ def seed_csv(src: str, dst: str) -> None:
     """
     if os.path.abspath(src) == os.path.abspath(dst):
         return
-    if os.path.exists(dst) or not os.path.exists(src):
+    if not os.path.exists(src):
+        return
+    try:
+        # A zero-byte table counts as absent, not as present-and-empty. Every
+        # legitimate one has at least a header row, so 0 bytes means an
+        # interrupted write or a truncated copy - and left in place it would
+        # read as "no rules at all" and make every description look new.
+        if os.path.exists(dst) and os.path.getsize(dst) > 0:
+            return
+    except OSError:
         return
     shutil.copyfile(src, dst)
+
+
+def back_up_tables(data_dir: str, backup_dir: str, names) -> None:
+    """Copy the live tables aside, so losing them costs one run at most.
+
+    Runs at startup, before anything this session can change, so the backup is
+    always the last known-good state rather than a mirror of whatever just
+    happened. Empty files are skipped: a truncated table must not be allowed to
+    overwrite a good backup with nothing.
+
+    Best-effort throughout - a read-only share or a locked file means no
+    backup, never a failed run.
+    """
+    if not backup_dir:
+        return
+    try:
+        os.makedirs(backup_dir, exist_ok=True)
+    except OSError:
+        return
+    for name in names:
+        source = os.path.join(data_dir, name)
+        try:
+            if os.path.getsize(source) <= 0:
+                continue
+            shutil.copyfile(source, os.path.join(backup_dir, name))
+        except OSError:
+            continue
 
 
 def ensure_csv(path: str, header: list[str]) -> None:

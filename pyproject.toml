@@ -27,3 +27,9 @@ inventor_to_radan = [
     "nonlaser_tokens.csv",
     "stock_cut_parts.csv",
 ]
+
+[tool.pytest.ini_options]
+# Only our tests. Without this, a run started right after build_verify_exe.bat
+# collects .buildvenv's site-packages and reports scores of errors that have
+# nothing to do with this app.
+testpaths = ["tests"]

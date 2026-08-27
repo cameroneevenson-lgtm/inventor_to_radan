@@ -131,6 +131,27 @@ CONFIG_CSV_NAMES = (
 # After CONFIG_CSV_NAMES: the migration needs to know which files to move.
 _migrate_loose_tables(DATA_DIR)
 
+
+def _resolve_backup_dir() -> str:
+    """Last run's tables, kept beside the live ones. Empty string disables it.
+
+    Beside `data`, deliberately not inside it. The whole point is surviving
+    "someone deleted the data folder", and a backup living in that folder goes
+    with it - the next launch would then reseed from the build-time snapshot
+    and back *that* up, destroying the only copy of everything learned since
+    deployment on the second launch.
+
+    A checkout gets no backup: its tables are version controlled, so git
+    already is one, and a stray `inventor_to_radan.backup` next to the repo
+    would just be litter.
+    """
+    if not DATA_DIR or DATA_DIR == PKG_DIR:
+        return ""
+    return DATA_DIR.rstrip(chr(92) + "/") + ".backup"
+
+
+BACKUP_DIR = _resolve_backup_dir()
+
 # Where the picker looks for recently-touched BOMs to offer as a shortlist.
 # Empty string disables the shortlist; the Select BOM... button is unaffected.
 BOM_SEARCH_ROOT = os.environ.get(

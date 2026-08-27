@@ -75,6 +75,7 @@ from bom_reader import (
     to_int,
 )
 from config import (
+    BACKUP_DIR,
     CONFIG_CSV_NAMES,
     DATA_DIR,
     FTQ_CSV,
@@ -283,11 +284,21 @@ def ensure_config_csvs() -> None:
     # caller that points RULES_CSV somewhere of its own wants that file left
     # alone, not backfilled with the shop catalog.
     for name in CONFIG_CSV_NAMES:
-        seed_csv(os.path.join(SEED_DIR, name), os.path.join(DATA_DIR, name))
+        target = os.path.join(DATA_DIR, name)
+        # Last run's copy first, the build-time snapshot only as a last resort.
+        # Both are no-ops if the file is already there; what matters is the
+        # order, because the backup holds everything learned since this build
+        # was made and the snapshot does not.
+        if BACKUP_DIR:
+            seed_csv(os.path.join(BACKUP_DIR, name), target)
+        seed_csv(os.path.join(SEED_DIR, name), target)
     ensure_csv(RULES_CSV, ["Description", "Material", "Thickness", "Strategy"])
     ensure_csv(FTQ_CSV, ["PartNumber"])
     ensure_csv(NONLASER_TOKENS_CSV, ["Token"])
     ensure_csv(STOCK_CUT_PARTS_CSV, ["PartFamily"])
+
+    # Only now, with the tables whole, take the copy this run will fall back to.
+    rule_store.back_up_tables(DATA_DIR, BACKUP_DIR, CONFIG_CSV_NAMES)
 
 
 def prepare_bom_rows(bom_path: str) -> tuple[list[dict], str]:
