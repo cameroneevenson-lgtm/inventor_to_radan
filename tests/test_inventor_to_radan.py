@@ -16,6 +16,7 @@ if str(PROJECT_DIR) not in sys.path:
 
 import bom_converter
 import bom_finder
+import config
 import inline_runner
 import rule_store
 
@@ -694,6 +695,57 @@ class UpstreamPromptTests(unittest.TestCase):
                     str(self.bom_path), allow_prompts=False, show_summary=False
                 )
         self.assertIn("BRAND NEW MATERIAL", caught.exception.missing_rules)
+
+
+class FrozenDataFolderTests(unittest.TestCase):
+    """The exe keeps its tables in a `data` folder beside itself. Builds before
+    that kept them loose beside the exe, and on a deployed copy those loose
+    files are not a stale snapshot - they are the live tables, holding every
+    classification made since it went out.
+    """
+
+    def setUp(self) -> None:
+        self._temp_context = tempfile.TemporaryDirectory(prefix="inventor_to_radan_mig_")
+        self.exe_dir = Path(self._temp_context.name)
+        self.data_dir = self.exe_dir / config.FROZEN_DATA_SUBDIR
+
+    def tearDown(self) -> None:
+        self._temp_context.cleanup()
+
+    def write_loose(self, text: str = "Description,Material,Thickness,Strategy\nKEEP ME,Al,0.1,Air\n"):
+        for name in config.CONFIG_CSV_NAMES:
+            (self.exe_dir / name).write_text(text, encoding="utf-8")
+
+    def test_loose_tables_are_moved_not_abandoned(self) -> None:
+        self.write_loose()
+        config._migrate_loose_tables(str(self.data_dir))
+
+        self.assertTrue(self.data_dir.is_dir())
+        for name in config.CONFIG_CSV_NAMES:
+            self.assertIn("KEEP ME", (self.data_dir / name).read_text(encoding="utf-8"))
+            self.assertFalse((self.exe_dir / name).exists(), f"{name} left behind to go stale")
+
+    def test_an_existing_data_folder_is_never_overwritten(self) -> None:
+        """Second run, or a copy already on the new layout: the live folder wins."""
+        self.data_dir.mkdir()
+        (self.data_dir / "description_rules.csv").write_text("CURRENT", encoding="utf-8")
+        self.write_loose()
+
+        config._migrate_loose_tables(str(self.data_dir))
+        self.assertEqual(
+            (self.data_dir / "description_rules.csv").read_text(encoding="utf-8"), "CURRENT"
+        )
+
+    def test_a_fresh_install_migrates_nothing(self) -> None:
+        config._migrate_loose_tables(str(self.data_dir))
+        self.assertFalse(self.data_dir.exists(), "created a folder with nothing to put in it")
+
+    def test_only_runs_for_the_frozen_layout(self) -> None:
+        """A clone's DATA_DIR is the checkout itself; nothing should move."""
+        self.write_loose()
+        config._migrate_loose_tables(str(self.exe_dir))
+        for name in config.CONFIG_CSV_NAMES:
+            self.assertTrue((self.exe_dir / name).exists())
 
 
 if __name__ == "__main__":

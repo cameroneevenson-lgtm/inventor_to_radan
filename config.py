@@ -25,6 +25,35 @@ def _resolve_seed_dir() -> str:
     return PKG_DIR
 
 
+# The exe's tables live in a subfolder rather than loose beside it: the folder
+# people copy to a share should look like a program, not a pile of CSVs.
+FROZEN_DATA_SUBDIR = "data"
+
+
+def _migrate_loose_tables(data_dir: str) -> None:
+    """Move tables written by an older exe into the new `data` folder.
+
+    Builds before this change kept the four CSVs loose beside the exe, and on
+    a deployed copy those are not a stale snapshot - they are the live tables,
+    holding every classification made since it went out. Seeding a fresh
+    `data` folder from the bundle instead would silently abandon them.
+    """
+    if os.path.basename(data_dir) != FROZEN_DATA_SUBDIR or os.path.isdir(data_dir):
+        return
+    legacy_dir = os.path.dirname(data_dir)
+    legacy = [n for n in CONFIG_CSV_NAMES if os.path.exists(os.path.join(legacy_dir, n))]
+    if not legacy:
+        return
+    try:
+        os.makedirs(data_dir, exist_ok=True)
+        for name in legacy:
+            os.replace(os.path.join(legacy_dir, name), os.path.join(data_dir, name))
+    except OSError:
+        # Read-only or a locked file: leave the originals alone. Seeding will
+        # fill the new folder from the bundle, which is wrong but not lossy.
+        pass
+
+
 def _user_data_dir() -> str:
     base = os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), ".local", "share")
     return os.path.join(base, "inventor_to_radan")
@@ -56,11 +85,11 @@ def _resolve_data_dir() -> str:
     and shared by pulling and committing them, so writes have to land in the
     clone.
 
-    A frozen exe keeps them beside itself. That is what makes a copy of the
-    dist folder on a share work as one shared installation: everyone running
+    A frozen exe keeps them in a `data` folder beside itself. That is what
+    makes a copy on a share work as one shared installation: everyone running
     it reads and writes the same four CSVs, instead of each PC quietly growing
     a private catalog under LOCALAPPDATA that nobody else ever sees. If the
-    share is read-only the per-user copy is the fallback, because the tool
+    location is read-only the per-user copy is the fallback, because the tool
     still has to be able to learn a rule.
 
     A pip install has nowhere safe to write - site-packages is replaced on the
@@ -74,7 +103,7 @@ def _resolve_data_dir() -> str:
     if getattr(sys, "frozen", False):
         beside_exe = os.path.dirname(os.path.abspath(sys.executable))
         if _is_writable(beside_exe):
-            return beside_exe
+            return os.path.join(beside_exe, FROZEN_DATA_SUBDIR)
         return _user_data_dir()
     if os.path.exists(os.path.join(PKG_DIR, ".git")):
         return PKG_DIR
@@ -98,6 +127,9 @@ CONFIG_CSV_NAMES = (
     "nonlaser_tokens.csv",
     "stock_cut_parts.csv",
 )
+
+# After CONFIG_CSV_NAMES: the migration needs to know which files to move.
+_migrate_loose_tables(DATA_DIR)
 
 # Where the picker looks for recently-touched BOMs to offer as a shortlist.
 # Empty string disables the shortlist; the Select BOM... button is unaffected.

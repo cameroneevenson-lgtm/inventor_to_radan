@@ -23,6 +23,30 @@ class MissingDependencyError(ImportError):
     """
 
 
+def tell(message: str, *, title: str = "Inventor to RADAN") -> None:
+    """Say something to whoever is running this, whatever they are running it as.
+
+    A windowed build has no console: PyInstaller sets sys.stdout and sys.stderr
+    to None, and a bare print() then raises. So the frozen app gets a message
+    box and the script run keeps its console output.
+    """
+    if getattr(sys, "frozen", False):
+        try:
+            from tkinter import messagebox
+
+            from dialogs.tk_base import ensure_root
+
+            ensure_root()
+            messagebox.showinfo(title, message)
+            return
+        except Exception:
+            pass
+    try:
+        print(message)
+    except Exception:
+        pass
+
+
 def _missing(package: str, install: str, cause: ImportError):
     """What to do about a missing package, which depends on who is asking.
 
@@ -33,7 +57,7 @@ def _missing(package: str, install: str, cause: ImportError):
     """
     message = f"{package} is not installed.\nRun: python -m pip install {install}"
     if __name__ == "__main__":
-        print(f"ERROR: {message}")
+        tell(f"ERROR: {message}")
         raise SystemExit(1)
     raise MissingDependencyError(message) from cause
 
@@ -592,7 +616,7 @@ def run_cli(argv: list[str] | None = None, *, write_csv: bool = True) -> int:
         input("Script started. Press Enter to continue...")
 
     if not args:
-        print("Drag a BOM (.csv or .xlsx) onto this script.")
+        tell("Drag a BOM (.csv or .xlsx) onto this script.")
         return 1
 
     ensure_root()

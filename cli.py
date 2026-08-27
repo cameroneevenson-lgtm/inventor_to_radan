@@ -16,6 +16,10 @@ def main() -> int:
     try:
         from inventor_to_radan import bom_converter
     except ImportError as exc:
-        print(f"ERROR: {exc}")
+        # No `tell` here: importing bom_converter is what just failed.
+        try:
+            print(f"ERROR: {exc}")
+        except Exception:
+            pass
         return 1
     return bom_converter.run_cli()
