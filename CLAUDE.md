@@ -121,10 +121,12 @@ anything under `PUMP PACK` at depth 3; a shallower bound still lists job BOMs, s
 like it works while hiding every canonical kit BOM. It must also never offer a
 `*_Radan.csv` or the app's own rule tables - this tool writes both into the folders it
 scans, and listing one is how somebody converts a converted file. Filtered to 14 days
-(~800 spreadsheets live under that root), walked newest-first, stopped at 10 results or 5 s
-(whichever first), and run on a worker thread. The ordering is what makes both caps safe -
-current work surfaces in the first second or two, so they drop only the oldest end of the
-search; on the real share a 5 s
+(~800 spreadsheets live under that root), walked newest-first, ended by a 5 s budget, and run on a
+worker thread; the 10-row limit trims the date-sorted result and must never become a
+stopping condition. A folder's timestamp tracks its own entries, not its subfolders'
+contents - a job stamped 2026-08-01 held a BOM from 2026-08-25 - so discovery order is only
+loosely date ordered, and stopping the walk at ten dropped 2 of the true newest 10.
+The ordering still earns its place by surfacing current work in the first second or two; on the real share a 5 s
 cap returned the same BOMs as the full 20.8 s walk. A share that is slow or unmapped would
 otherwise freeze the window before it appeared.
 

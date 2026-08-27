@@ -57,14 +57,17 @@ def find_recent_boms(
     `on_hit(path, mtime)` is called for each match as it is found, so the
     picker can fill its list during the walk rather than after it.
 
-    The walk stops at whichever comes first: `limit` results, or `time_budget`
-    seconds. Folders are visited newest-first, so what either one drops is the
-    oldest end of the search - the full walk is ~25 s over the network and
-    every current BOM turns up in the first second or two of it.
+    `time_budget` ends the walk; `limit` only trims the sorted result. They are
+    deliberately not the same thing.
 
-    Because that ordering is a heuristic (a folder's own timestamp, not its
-    contents'), stopping at `limit` returns the first N found rather than a
-    guaranteed newest N. They are still sorted by date on the way out.
+    Folders are visited newest-first, but a folder's timestamp tracks its own
+    entries, not its subfolders' contents: job F59270 is stamped 2026-08-01
+    while holding a BOM from 2026-08-25, because the edit landed one level
+    further down. Discovery order is therefore only loosely date ordered, and
+    stopping the walk as soon as `limit` results existed dropped 2 of the true
+    newest 10 on the real share. Collecting everything the budget allows and
+    sorting afterwards costs nothing - the budget ends the walk either way -
+    and cannot pick the wrong ten.
 
     Returns an empty list rather than raising if the drive is not mapped - the
     picker still works, it just has nothing to suggest.
@@ -74,8 +77,6 @@ def find_recent_boms(
     deadline = None if time_budget is None else time.monotonic() + time_budget
 
     def should_stop() -> bool:
-        if limit and len(found) >= limit:
-            return True
         return deadline is not None and time.monotonic() >= deadline
 
     def walk(path: str, depth: int) -> None:
@@ -96,8 +97,6 @@ def find_recent_boms(
                             found.append((entry.path, mtime))
                             if on_hit is not None:
                                 on_hit(entry.path, mtime)
-                            if should_stop():
-                                return
                     except OSError:
                         continue
         except OSError:

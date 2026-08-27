@@ -129,16 +129,16 @@ excluded - the tool writes those next to the BOM they came from, and offering on
 an input is how somebody converts a converted file.
 
 The search root defaults to `W:\LASER\For Battleshield Fabrication`, scanned three levels
-deep, filtered to the last 14 days, and stopped at 10 results or 5 seconds, whichever
-comes first. The depth matters: a whole-job BOM sits at depth
+deep, filtered to the last 14 days, ended after 5 seconds, and trimmed to the 10 newest. The depth matters: a whole-job BOM sits at depth
 1 (`P59979\`), a pack BOM at depth 2 (`F59270\EXTERIOR PACK\`), and anything under
 `PUMP PACK\` at depth 3 - so a shallower scan shows job BOMs while silently hiding every
 canonical kit BOM. Rows are labelled with the folder path relative to the root, because a
 kit BOM's own folder is called `PUMP HOUSE` and does not say which truck.
 
-Folders are walked newest-first, which is what makes both stopping conditions safe:
-everything current turns up in the first second or two, so what they drop is the oldest end
-of the search. Measured on the real share, capping a 20.8 s walk at 5 s returned exactly the
+Folders are walked newest-first, so everything current turns up in the first second or two
+and the 5-second cut costs nothing. The 10-row limit trims the sorted result rather than
+stopping the walk - a folder's timestamp tracks its own entries, not its subfolders', so the
+order results are found in is only loosely date ordered. Measured on the real share, capping a 20.8 s walk at 5 s returned exactly the
 same BOMs. Rows appear in the list as they are found, off the UI thread.
 
 `INVENTOR_TO_RADAN_BOM_ROOT` overrides the root; an empty string turns the shortlist off.

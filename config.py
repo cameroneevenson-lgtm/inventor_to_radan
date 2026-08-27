@@ -177,9 +177,11 @@ BOM_MAX_AGE_DAYS = 14
 # share: every hit arrived inside 2 s of a 25 s walk.
 BOM_SCAN_SECONDS = 5.0
 
-# Stop once this many are found - a stopping condition, not just a trim. With
-# newest-first traversal the first hits are the current work, so filling the
-# list is reason enough to stop walking the rest of the share.
+# How many rows the picker shows. A trim of the date-sorted result, not a
+# stopping condition: folder timestamps track their own entries rather than
+# their subfolders' contents, so the order results are *found* in is only
+# loosely date ordered, and stopping the walk at ten dropped 2 of the true
+# newest 10 on the real share. BOM_SCAN_SECONDS is what ends the walk.
 BOM_SHORTLIST_LIMIT = 10
 
 RADAN_OUTPUT_SUFFIX = "_Radan.csv"
