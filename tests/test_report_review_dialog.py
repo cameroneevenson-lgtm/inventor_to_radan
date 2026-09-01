@@ -141,6 +141,19 @@ class ReportReviewDialogTests(unittest.TestCase):
         dialog.set_line_checked(0, False)
         self.assertFalse(dialog.ack_enabled(), "unchecking a line must disable it again")
 
+    def test_banner_counts_track_warning_lines(self) -> None:
+        """The banner reads the same warning-line extraction that grows the
+        checkboxes. Counting the result's fields instead once said "No report
+        warnings" over a New-descriptions checkbox."""
+        report_text = (
+            "New descriptions (laser, but no RADAN rule yet):\n"
+            "  TITANIUM SPACE PANEL 9000\n"
+        )
+        dialog = self.build(report_text)
+
+        self.assertEqual(dialog.checklist_labels(), ["TITANIUM SPACE PANEL 9000"])
+        self.assertIn("1 item(s) to check", dialog.banner_text())
+
     def test_no_warnings_means_no_line_checkboxes(self) -> None:
         report_text = (
             "Expected laser but missing DXF:\n"

@@ -4,33 +4,17 @@ import os
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+import report_review_rules
 from dialogs.tk_base import TkDialog, make_label
 
-_COLORS = {
-    "base": "#111827",
-    "muted": "#475569",
-    "green": "#15803D",
-    "yellow": "#A16207",
-    "red": "#B91C1C",
-}
+_COLORS = report_review_rules.COLORS
 
 
 class ReportReviewDialog(TkDialog):
-    # Non-laser parts are green, not yellow: every line there matched a token
-    # the operator already put in nonlaser_tokens.csv, so it confirms the
-    # classification rather than asking for a decision. One BOM produced 18 of
-    # them, and 18 checkboxes with nothing behind them is the click-through
-    # fatigue that made the old single blanket checkbox worthless.
-    REVIEW_SECTION_LEVELS = {
-        "Expected laser but missing DXF": "red",
-        # A verification run cannot resolve these itself; somebody with the
-        # RADAN vocabulary has to add the rule before the parts can be nested.
-        "New descriptions": "yellow",
-        "Orphan DXFs": "yellow",
-        "DXFs missing PDFs": "yellow",
-        "Non-laser parts": "green",
-        "Cut to length from stock": "green",
-    }
+    # The section->level map and warning-line extraction are shared with
+    # truck_nest_explorer's Qt dialog - see report_review_rules.py for the
+    # rules and their rationale.
+    REVIEW_SECTION_LEVELS = report_review_rules.REVIEW_SECTION_LEVELS
 
     title = "Review Inventor-to-RADAN Report"
 
@@ -42,22 +26,27 @@ class ReportReviewDialog(TkDialog):
         make_label(self.body, "Review required before production use", bold=True).pack(
             fill="x", anchor="w"
         )
-        warning_count = (
-            len(result.expected_missing_dxfs)
-            + len(result.orphan_dxfs)
-            + len(result.missing_pdfs)
-        )
-        critical_count = len(result.expected_missing_dxfs)
+
+        try:
+            report_text = open(result.report_path, encoding="utf-8").read()
+        except OSError as exc:
+            report_text = f"Could not read report file:\n{exc}"
+
+        # Counts come from the same warning-line extraction that grows the
+        # checkboxes, so the banner can never say "0 items to check" while a
+        # checkbox is showing (counting the result's fields did exactly that
+        # for New descriptions).
+        critical_count, review_count = report_review_rules.warning_counts(report_text)
         if critical_count:
             detail_text = (
                 f"This report contains {critical_count} critical item(s) and "
-                f"{warning_count - critical_count} review item(s). "
+                f"{review_count} review item(s). "
                 "Read the report below before acknowledging completion."
             )
             detail_color = _COLORS["red"]
-        elif warning_count:
+        elif review_count:
             detail_text = (
-                f"This report contains {warning_count} item(s) to check. "
+                f"This report contains {review_count} item(s) to check. "
                 "Read the yellow sections below before acknowledging completion."
             )
             detail_color = _COLORS["yellow"]
@@ -69,13 +58,9 @@ class ReportReviewDialog(TkDialog):
         detail = make_label(self.body, detail_text, bold=True)
         detail.configure(foreground=detail_color)
         detail.pack(fill="x", anchor="w", pady=(2, 0))
+        self._detail_text = detail_text
 
         make_label(self.body, f"Report: {result.report_path}").pack(fill="x", anchor="w", pady=(2, 6))
-
-        try:
-            report_text = open(result.report_path, encoding="utf-8").read()
-        except OSError as exc:
-            report_text = f"Could not read report file:\n{exc}"
 
         viewer_frame = ttk.Frame(self.body)
         viewer_frame.pack(fill="both", expand=True)
@@ -194,25 +179,8 @@ class ReportReviewDialog(TkDialog):
 
     @classmethod
     def _warning_lines(cls, report_text: str) -> list[tuple[str, str]]:
-        """(level, line) for every red/yellow item in the report - the
-        individual things that need their own checkbox, not the section
-        header above them or a "(none)" that has nothing to acknowledge."""
-        active_level = ""
-        lines: list[tuple[str, str]] = []
-        for line in report_text.splitlines():
-            stripped = line.strip()
-            if stripped.endswith(":"):
-                active_level = ""
-                for section, level in cls.REVIEW_SECTION_LEVELS.items():
-                    if stripped.startswith(section):
-                        active_level = level
-                        break
-                continue
-            if not stripped or stripped == "(none)":
-                continue
-            if active_level in ("red", "yellow"):
-                lines.append((active_level, stripped))
-        return lines
+        """(level, line) for every red/yellow item - see report_review_rules."""
+        return report_review_rules.warning_lines(report_text)
 
     # ---- behaviour accessors
     #
@@ -234,6 +202,9 @@ class ReportReviewDialog(TkDialog):
 
     def ack_enabled(self) -> bool:
         return str(self.btn_ack.cget("state")) == "normal"
+
+    def banner_text(self) -> str:
+        return self._detail_text
 
     def close(self) -> None:
         if self.window.winfo_exists():

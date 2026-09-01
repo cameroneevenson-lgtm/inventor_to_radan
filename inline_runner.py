@@ -6,7 +6,14 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
-INLINE_IMPORT_NAMES = {"bom_reader", "config", "dialogs", "report_writer", "rule_store"}
+INLINE_IMPORT_NAMES = {
+    "bom_reader",
+    "config",
+    "dialogs",
+    "report_review_rules",
+    "report_writer",
+    "rule_store",
+}
 INLINE_MODULE_NAME = "_inventor_to_radan_inline_tool"
 
 
