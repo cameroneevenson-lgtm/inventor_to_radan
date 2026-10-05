@@ -5,6 +5,8 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
+from radan_tools.sibling_import import SiblingModules
+
 
 INLINE_IMPORT_NAMES = {
     "bom_reader",
@@ -24,28 +26,10 @@ def module_path_for_entry(entry_path: Path | str) -> Path:
     return entry.parent / "bom_converter.py"
 
 
-def _is_inline_import_name(module_name: str) -> bool:
-    return module_name in INLINE_IMPORT_NAMES or module_name.startswith("dialogs.")
-
-
 @contextmanager
 def inline_import_context(module_dir: Path):
-    previous_sys_path = list(sys.path)
-    previous_modules = {
-        name: sys.modules[name]
-        for name in list(sys.modules)
-        if _is_inline_import_name(name)
-    }
-    for name in previous_modules:
-        sys.modules.pop(name, None)
-    sys.path.insert(0, str(module_dir))
-    try:
+    with SiblingModules(module_dir).active():
         yield
-    finally:
-        for name in [name for name in sys.modules if _is_inline_import_name(name)]:
-            sys.modules.pop(name, None)
-        sys.modules.update(previous_modules)
-        sys.path[:] = previous_sys_path
 
 
 def run_inline(
