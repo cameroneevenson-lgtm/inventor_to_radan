@@ -1,4 +1,5 @@
 # CLAUDE.md
+New/changed Python lines must pass Ruff via the pre-commit hook; install it with `C:\Tools\.venv\Scripts\python.exe C:\Tools\tools_bootstrap\install_hooks.py`.
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
