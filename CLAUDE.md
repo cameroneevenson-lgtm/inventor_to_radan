@@ -64,3 +64,15 @@ C:\Tools\.venv\Scripts\python.exe -m pytest tests/test_inventor_to_radan.py -k t
 ## Branching
 
 All work happens on `main`. Do not create branches for agent work - commit and push straight to `main`. If an agent branch does turn up, fold it into `main`, prune it locally and on the remote, then push.
+
+## File editing workflow (required)
+
+Never write changes directly into a production source file.
+
+Always:
+1. Write the complete proposed change into a scratch / temporary file first.
+2. Once the full thought is finished in the scratch file, automatically apply the diff to the production file.
+
+No human review of the scratch file is required. Finish the complete change in scratch, then apply it.
+
+Direct writes risk partial or corrupt state. Hot-reload while an edit is still in progress will fail the process.
