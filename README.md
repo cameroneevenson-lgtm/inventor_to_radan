@@ -141,6 +141,7 @@ stopping the walk - a folder's timestamp tracks its own entries, not its subfold
 order results are found in is only loosely date ordered. Measured on the real share, capping a 20.8 s walk at 5 s returned exactly the
 same BOMs. Rows appear in the list as they are found, off the UI thread.
 
+`radan_tools` is optional: when installed, its site configuration supplies the default root.
 `INVENTOR_TO_RADAN_BOM_ROOT` overrides the root; an empty string turns the shortlist off.
 If the drive is not mapped the list is simply empty and the buttons still work.
 

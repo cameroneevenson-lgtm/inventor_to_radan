@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import os
 import sys
-from radan_tools.site_config import load_site_config
+try:
+    from radan_tools.site_config import load_site_config
+except ImportError:
+    load_site_config = None
 
 PKG_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -156,7 +159,9 @@ BACKUP_DIR = _resolve_backup_dir()
 # Where the picker looks for recently-touched BOMs to offer as a shortlist.
 # Empty string disables the shortlist; the Select BOM... button is unaffected.
 BOM_SEARCH_ROOT = os.environ.get(
-    "INVENTOR_TO_RADAN_BOM_ROOT", str(load_site_config().fabrication_root)
+    "INVENTOR_TO_RADAN_BOM_ROOT",
+    str(load_site_config().fabrication_root) if load_site_config is not None
+    else r"W:\LASER\For Battleshield Fabrication",
 )
 
 # Depth 3, because a kit BOM is not at job level. Measured under that root:
