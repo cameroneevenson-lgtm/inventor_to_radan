@@ -235,6 +235,31 @@ class InventorToRadanTests(unittest.TestCase):
                 sys.modules.pop(name, None)
             sys.modules.update(saved_modules)
 
+    def test_the_sibling_lock_is_not_held_while_the_converter_runs(self) -> None:
+        tool_dir = self.temp_dir / "lock_tool"
+        tool_dir.mkdir()
+        spreadsheet = self.temp_dir / "lock_bom.csv"
+        spreadsheet.write_text("Part Number,Description,Qty\n", encoding="utf-8")
+        entry = tool_dir / "bom_converter.py"
+        entry.write_text(
+            "import threading\n"
+            "from radan_tools.sibling_import import SWAP_LOCK\n"
+            "def convert_bom_to_radan_csv(path, *, allow_prompts, show_summary):\n"
+            "    out = []\n"
+            "    def other():\n"
+            "        got = SWAP_LOCK.acquire(timeout=2)\n"
+            "        out.append(got)\n"
+            "        if got:\n"
+            "            SWAP_LOCK.release()\n"
+            "    t = threading.Thread(target=other)\n"
+            "    t.start()\n"
+            "    t.join()\n"
+            "    return out[0]\n",
+            encoding="utf-8",
+        )
+
+        self.assertTrue(inline_runner.run_inline(entry, spreadsheet, allow_prompts=False, show_summary=False))
+
     def test_inventor_module_loads_from_spec_without_project_on_sys_path(self) -> None:
         saved_path = list(sys.path)
         saved_modules = {

@@ -66,9 +66,12 @@ def run_inline(
                     f"{module_path} does not expose convert_bom_to_radan_csv(). "
                     "Use the external launcher for this version."
                 )
-            return converter(str(spreadsheet), allow_prompts=allow_prompts, show_summary=show_summary)
         finally:
             if previous_module is not None:
                 sys.modules[INLINE_MODULE_NAME] = previous_module
             else:
                 sys.modules.pop(INLINE_MODULE_NAME, None)
+    # Outside the import context on purpose: it holds the process-wide sibling
+    # lock, and a conversion can sit in modal dialogs for as long as the
+    # operator likes. The loaded module keeps its own references.
+    return converter(str(spreadsheet), allow_prompts=allow_prompts, show_summary=show_summary)
