@@ -337,9 +337,14 @@ def collect_missing_dxf_prompt_items(rows: list[dict]) -> list[dict]:
     # that is the order the classify dialog has always shown them in (the
     # pandas groupby this replaced sorted its group keys).
     counts: dict[str, int] = {}
+    stock_cut_families = _stock_cut_families()
     for r in rows:
-        if not r["_HasDxf"]:
-            counts[r["_Desc"]] = counts.get(r["_Desc"], 0) + 1
+        if r["_HasDxf"]:
+            continue
+        # Cut to length from stock: no DXF is ever drawn, whatever the description.
+        if r["_Part"] and part_family(r["_Part"]).lower() in stock_cut_families:
+            continue
+        counts[r["_Desc"]] = counts.get(r["_Desc"], 0) + 1
 
     if counts:
         expected_desc = set(load_rules())

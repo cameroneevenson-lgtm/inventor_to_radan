@@ -140,6 +140,17 @@ class InventorToRadanTests(unittest.TestCase):
         report = Path(result.report_path).read_text(encoding="utf-8")
         self.assertIn("Cut to length from stock (no DXF expected):\n  TIE DOWN-18\n", report)
 
+    def test_stock_cut_part_with_an_unknown_description_is_not_classified(self) -> None:
+        bom_path = self.write_bom([["TIE DOWN-18", "SOMETHING NOBODY HAS A RULE FOR", "2"]])
+        (self.config_dir / "stock_cut_parts.csv").write_text("PartFamily\nTIE DOWN\n", encoding="utf-8")
+
+        with self.patch_config_paths():
+            result = bom_converter.convert_bom_to_radan_csv(
+                str(bom_path), allow_prompts=False, show_summary=False
+            )
+
+        self.assertEqual(result.stock_cut_parts, ("TIE DOWN-18",))
+
     def test_interactive_expected_laser_choice_creates_complete_rule(self) -> None:
         bom_path = self.write_bom([["ABC-004", "NEW MISSING LASER PANEL", "1"]])
 
