@@ -8,6 +8,8 @@ from pathlib import Path
 from radan_tools.sibling_import import SiblingModules
 
 
+# Only the tests read this (their sys.modules cleanup list); isolation itself
+# comes from SiblingModules, which takes every top-level module in the folder.
 INLINE_IMPORT_NAMES = {
     "bom_reader",
     "config",

@@ -2,7 +2,7 @@
 
 ## Prerequisites and location
 
-- Clone to `C:\Tools\inventor_to_radan` and recreate the shared Python environment.
+- Clone to `C:\Tools\inventor_to_radan` (and `C:\Tools\radan_tools`, which it imports) and recreate the shared Python environment.
 - Reinstall/license Autodesk Inventor and RADAN as required by the surrounding production workflow.
 - Restore the `W:`/engineering share mappings used for BOM input and report output.
 
@@ -10,7 +10,7 @@
 
 ```powershell
 Set-Location C:\Tools\inventor_to_radan
-C:\Tools\.venv\Scripts\python.exe -m pip install pandas openpyxl pyside6
+C:\Tools\.venv\Scripts\python.exe -m pip install openpyxl
 ```
 
 Ensure `inventor_to_radan.bat` points to `C:\Tools\.venv\Scripts\python.exe` rather than an obsolete
@@ -18,8 +18,8 @@ machine-specific interpreter.
 
 ## Configuration and state
 
-Classification rules and CSV configuration (`description_rules.csv`, `ftq_parts.csv`, and
-`nonlaser_tokens.csv`) are tracked by Git. Missing local CSV configuration is recreated by the app. BOM inputs,
+Classification rules and CSV configuration (`description_rules.csv`, `ftq_parts.csv`,
+`nonlaser_tokens.csv` and `stock_cut_parts.csv`) are tracked by Git. Missing local CSV configuration is recreated by the app. BOM inputs,
 generated reports, and production job material remain authoritative on company shares. Caches, logs, and test
 outputs are not backed up, and this repository has no separate live-state entry in the encrypted bundle.
 

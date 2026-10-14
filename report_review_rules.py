@@ -5,8 +5,8 @@ there) and this repo's Tk dialog (dialogs/report_review_dialog.py) show the
 same report and must gate it identically. The toolkits cannot share widget
 code, so the rules live here instead: which section is red/yellow/green,
 which lines need their own checkbox, and what the banner counts. Stdlib
-only, and listed in inline_runner.INLINE_IMPORT_NAMES so inline runs from
-truck_nest_explorer clean it out of sys.modules like its siblings.
+only. Inline runs from truck_nest_explorer isolate it from the host app
+with every other module in this folder (radan_tools.sibling_import).
 """
 
 from __future__ import annotations

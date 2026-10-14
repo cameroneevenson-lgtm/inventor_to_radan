@@ -47,7 +47,7 @@ Convert an Inventor BOM (`.csv` or `.xlsx`) into a Radan import CSV, with DXF ac
 
 ## Programmatic use
 
-`inline_runner.run_inline()` and `convert_bom_to_radan_csv()` (`bom_converter.py`) provide a headless conversion path with no dialogs, used by the sibling app `truck_nest_explorer` (`services.py` `run_inventor_to_radan_inline`, called with `allow_prompts=False, show_summary=False`). Passing `allow_prompts=False` skips the missing-DXF/missing-rule prompts and the Report Review gate; callers get `InventorToRadanNeedsUi`, `InventorToRadanCancelled`, or `InventorToRadanReportRejected` raised instead.
+`inline_runner.run_inline()` and `convert_bom_to_radan_csv()` (`bom_converter.py`) provide a headless conversion path with no dialogs, used by the sibling app `truck_nest_explorer` (`inventor_bridge.py` `run_inventor_to_radan_inline`, called with `allow_prompts=False, show_summary=False`). Passing `allow_prompts=False` skips the missing-DXF/missing-rule prompts and the Report Review gate; callers get `InventorToRadanNeedsUi`, `InventorToRadanCancelled`, or `InventorToRadanReportRejected` raised instead.
 
 ## Install
 
