@@ -151,6 +151,76 @@ class InventorToRadanTests(unittest.TestCase):
 
         self.assertEqual(result.stock_cut_parts, ("TIE DOWN-18",))
 
+    def _laser_bom(self) -> Path:
+        bom_path = self.write_bom([["ABC-001", "LASER PANEL", "2"]])
+        (self.temp_dir / "ABC-001.dxf").write_text("dxf", encoding="utf-8")
+        (self.config_dir / "description_rules.csv").write_text(
+            "Description,Material,Thickness,Strategy\n"
+            "LASER PANEL,Aluminum 3003,0.125,Default\n",
+            encoding="utf-8",
+        )
+        return bom_path
+
+    def _review_dialog(self, accepted: bool):
+        class _Dialog:
+            def __init__(self, result) -> None:
+                self.result = result
+
+            def exec(self) -> int:
+                return bom_converter.ACCEPTED if accepted else bom_converter.ACCEPTED + 1
+
+        return _Dialog
+
+    def test_discarding_the_report_review_deletes_both_outputs(self) -> None:
+        bom_path = self._laser_bom()
+
+        with self.patch_config_paths(), patch.object(
+            bom_converter, "ReportReviewDialog", self._review_dialog(accepted=False)
+        ):
+            with self.assertRaises(bom_converter.InventorToRadanReportRejected):
+                bom_converter.convert_bom_to_radan_csv(str(bom_path), show_summary=True)
+
+        self.assertFalse((self.temp_dir / "kit-bom_Radan.csv").exists())
+        self.assertFalse((self.temp_dir / "kit-bom_report.txt").exists())
+
+    def test_accepting_the_report_review_keeps_both_outputs(self) -> None:
+        bom_path = self._laser_bom()
+
+        with self.patch_config_paths(), patch.object(
+            bom_converter, "ReportReviewDialog", self._review_dialog(accepted=True)
+        ):
+            bom_converter.convert_bom_to_radan_csv(str(bom_path), show_summary=True)
+
+        self.assertTrue((self.temp_dir / "kit-bom_Radan.csv").exists())
+        self.assertTrue((self.temp_dir / "kit-bom_report.txt").exists())
+
+    def test_delete_generated_outputs_reports_a_file_it_could_not_remove(self) -> None:
+        bom_path = self._laser_bom()
+        with self.patch_config_paths():
+            result = bom_converter.convert_bom_to_radan_csv(str(bom_path))
+        real_remove = os.remove
+
+        def refuse_the_csv(path):
+            if str(path).endswith("_Radan.csv"):
+                raise PermissionError("in use")
+            real_remove(path)
+
+        with patch.object(bom_converter.os, "remove", refuse_the_csv):
+            failed = bom_converter.delete_generated_outputs(result)
+
+        self.assertEqual(len(failed), 1)
+        self.assertIn("in use", failed[0])
+        self.assertTrue((self.temp_dir / "kit-bom_Radan.csv").exists())
+        self.assertFalse((self.temp_dir / "kit-bom_report.txt").exists())
+
+    def test_delete_generated_outputs_tolerates_files_already_gone(self) -> None:
+        bom_path = self._laser_bom()
+        with self.patch_config_paths():
+            result = bom_converter.convert_bom_to_radan_csv(str(bom_path))
+        bom_converter.delete_generated_outputs(result)
+
+        self.assertEqual(bom_converter.delete_generated_outputs(result), ())
+
     def test_interactive_expected_laser_choice_creates_complete_rule(self) -> None:
         bom_path = self.write_bom([["ABC-004", "NEW MISSING LASER PANEL", "1"]])
 
