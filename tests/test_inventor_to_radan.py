@@ -9,6 +9,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 if str(PROJECT_DIR := Path(__file__).resolve().parents[1]) not in sys.path:
@@ -64,6 +65,7 @@ class InventorToRadanTests(unittest.TestCase):
             )
 
         self.assertEqual(result.added_count, 1)
+        assert result.out_path is not None
         self.assertEqual(Path(result.out_path), self.temp_dir / "kit-bom_Radan.csv")
         self.assertEqual(Path(result.report_path), self.temp_dir / "kit-bom_report.txt")
         self.assertEqual(
@@ -303,6 +305,7 @@ class InventorToRadanTests(unittest.TestCase):
             )
 
             result = inline_runner.run_inline(entry, spreadsheet, allow_prompts=False, show_summary=False)
+            assert isinstance(result, SimpleNamespace)  # run_inline is typed -> object; the fake converter returns a SimpleNamespace
 
             self.assertEqual(result.added_count, 7)
             self.assertEqual(result.dialog_value, "inventor")
