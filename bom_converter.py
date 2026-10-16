@@ -3,33 +3,8 @@ import os
 import sys
 from dataclasses import dataclass
 
-TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
-if TOOL_DIR not in sys.path:
+if (TOOL_DIR := os.path.dirname(os.path.abspath(__file__))) not in sys.path:
     sys.path.insert(0, TOOL_DIR)
-
-
-def tell(message: str, *, title: str = "Inventor to RADAN") -> None:
-    """Say something to whoever is running this, whatever they are running it as.
-
-    A windowed build has no console: PyInstaller sets sys.stdout and sys.stderr
-    to None, and a bare print() then raises. So the frozen app gets a message
-    box and the script run keeps its console output.
-    """
-    if getattr(sys, "frozen", False):
-        try:
-            from tkinter import messagebox
-
-            from dialogs.tk_base import ensure_root
-
-            ensure_root()
-            messagebox.showinfo(title, message)
-            return
-        except Exception:
-            pass
-    try:
-        print(message)
-    except Exception:
-        pass
 
 
 from tkinter import messagebox
@@ -64,6 +39,31 @@ from dialogs.report_review_dialog import ReportReviewDialog
 from dialogs.tk_base import ACCEPTED, ensure_root
 from report_writer import write_report
 import rule_store
+
+
+def tell(message: str, *, title: str = "Inventor to RADAN") -> None:
+    """Say something to whoever is running this, whatever they are running it as.
+
+    A windowed build has no console: PyInstaller sets sys.stdout and sys.stderr
+    to None, and a bare print() then raises. So the frozen app gets a message
+    box and the script run keeps its console output.
+    """
+    if getattr(sys, "frozen", False):
+        try:
+            from tkinter import messagebox
+
+            from dialogs.tk_base import ensure_root
+
+            ensure_root()
+            messagebox.showinfo(title, message)
+            return
+        except Exception:
+            pass
+    try:
+        print(message)
+    except Exception:
+        pass
+
 
 # ============================================================
 # Configuration
